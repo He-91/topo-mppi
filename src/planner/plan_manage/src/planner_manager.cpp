@@ -232,8 +232,16 @@ namespace ego_planner
     Eigen::MatrixXd ctrl_pts;
     UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
 
+    // ✅ Fix Phase 1: Keep the original MPPI-optimized control points
+    // Problem: initControlPoints() initializes internal structures (cps_.resize, base_point, direction, etc.)
+    //          BUT also overwrites control points with linear interpolation from A* paths
+    // Solution: 1) Call initControlPoints to initialize internal structures
+    //           2) Immediately restore MPPI-optimized control points with setControlPoints
+    // This preserves MPPI's dynamic optimization while maintaining proper initialization
+    Eigen::MatrixXd mppi_optimized_ctrl_pts = ctrl_pts;  // Save MPPI result
     vector<vector<Eigen::Vector3d>> a_star_pathes;
     a_star_pathes = bspline_optimizer_rebound_->initControlPoints(ctrl_pts, true);
+    bspline_optimizer_rebound_->setControlPoints(mppi_optimized_ctrl_pts);  // Restore MPPI optimization
 
     t_init = ros::Time::now() - t_start;
 
