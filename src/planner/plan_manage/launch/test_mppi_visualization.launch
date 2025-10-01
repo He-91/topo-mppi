@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- MPPI Visualization Test Launch File -->
+    
+    <!-- Parameters -->
+    <param name="grid_map/frame_id" value="world" />
+    
+    <!-- Grid Map Parameters -->
+    <param name="grid_map/resolution" value="0.1" />
+    <param name="grid_map/map_size_x" value="20.0" />
+    <param name="grid_map/map_size_y" value="20.0" />
+    <param name="grid_map/map_size_z" value="5.0" />
+    <param name="grid_map/local_update_range_x" value="5.0" />
+    <param name="grid_map/local_update_range_y" value="5.0" />
+    <param name="grid_map/local_update_range_z" value="3.0" />
+    <param name="grid_map/obstacles_inflation" value="0.3" />
+    <param name="grid_map/local_map_margin" value="10" />
+    <param name="grid_map/ground_height" value="0.0" />
+    
+    <!-- MPPI Test Node -->
+    <node name="test_topo_mppi" pkg="path_searching" type="test_topo_mppi" output="screen">
+        <remap from="/grid_map/odom" to="/odom" />
+        <remap from="/grid_map/cloud" to="/cloud_registered" />
+    </node>
+    
+    <!-- RViz for visualization -->
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find plan_manage)/launch/mppi_test.rviz" required="false" />
+    
+</launch>

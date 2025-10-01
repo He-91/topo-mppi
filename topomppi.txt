@@ -1,0 +1,84 @@
+docker exec -it 65abafec5dc5 bash
+
+source devel/setup.bash
+roslaunch ego_planner simple_run.launch
+
+
+
+// 1. 直接路径检查，TOPO
+if (isPathValid(direct_path)) {
+    // 如果直线路径可行，添加为首选路径
+    paths.emplace_back(direct_path, cost, 0);
+}
+
+// 2. 障碍物检测和分类
+vector<Vector3d> obstacle_centers;
+// 沿着直线路径采样，找到阻挡的障碍物
+
+// 3. 多策略路径生成
+for (const auto& obstacle_center : filtered_obstacles) {
+    // 策略1: 环绕策略 - 左右绕行
+    generateCircularPath(start, goal, obstacle_center, side);
+    
+    // 策略2: 垂直策略 - 上下绕行
+    generateVerticalPath(start, goal, obstacle_center, vertical);
+    
+    // 策略3: 切线策略 - 基于几何切线
+    generateTangentPoints(start, goal, obstacle_center);
+
+}
+
+    
+    
+    路径评价机制
+    double cost = length_cost + 2.0 * smoothness_cost + 5.0 * obstacle_cost;
+
+
+MPPI
+轨迹生成过程
+// 为每个时间步生成带噪声的控制输入
+Vector3d nominal_acc = 2.0 * pos_error + 1.0 * vel_error;  // PD控制
+Vector3d noise_acc = sigma_acc_ * normal_distribution();     // 高斯噪声
+
+多目标成本函数
+// 前向积分动力学方程
+velocity[t] = velocity[t-1] + acceleration[t] * dt_;
+position[t] = position[t-1] + velocity[t-1] * dt_ + 0.5 * acceleration[t] * dt_^2;
+
+total_cost = w_obstacle_ * obstacleCost(position) +      // 避障成本
+            w_smoothness_ * smoothnessCost(trajectory) +  // 平滑性成本  
+            w_goal_ * goalCost(trajectory, goal) +        // 目标跟踪成本
+            w_velocity_ * velocityCost(trajectory);       // 速度成本
+            
+重要性采样权重计算
+// 计算每条轨迹的重要性权重
+trajectory.weight = exp(-(trajectory.cost - min_cost) / lambda_);
+
+// 加权平均得到最优轨迹
+optimal_trajectory = weightedAverage(trajectories);
+
+B-spline轨迹优化
+// 多目标优化函数
+J = λ₁ * J_smooth + λ₂ * J_collision + λ₃ * J_feasibility + λ₄ * J_fitness
+J_smooth: 轨迹平滑性（最小化加加速度）
+J_collision: 碰撞避免约束
+J_feasibility: 动力学可行性约束
+J_fitness: 目标适应性
+
+
+
+// 1. 初始化各个规划模块
+topo_planner_->init(nh, grid_map_);
+mppi_planner_->init(grid_map_);
+bspline_optimizer_->setEnvironment(grid_map_);
+
+// 2. 分层规划流程
+// 第一阶段：拓扑路径规划
+topo_planner_->searchTopoPaths(start, goal, topo_paths);
+
+// 第二阶段：MPPI轨迹优化  
+mppi_planner_->planTrajectory(start_pos, start_vel, goal_pos, goal_vel, optimal_traj);
+
+// 第三阶段：B-spline平滑优化
+bspline_optimizer_->optimize(control_points);
+
