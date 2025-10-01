@@ -23,6 +23,10 @@ namespace ego_planner
     nh.param("manager/feasibility_tolerance", pp_.feasibility_tolerance_, 0.0);
     nh.param("manager/control_points_distance", pp_.ctrl_pt_dist, -1.0);
     nh.param("manager/planning_horizon", pp_.planning_horizen_, 5.0);
+    
+    // 🚀 NEW: Parallel MPPI optimization parameter
+    nh.param("manager/use_parallel_mppi_optimization", pp_.use_parallel_mppi_optimization, false);
+    ROS_INFO("[PlannerManager] Parallel MPPI optimization: %s", pp_.use_parallel_mppi_optimization ? "ENABLED" : "DISABLED");
 
     local_data_.traj_id_ = 0;
     grid_map_.reset(new GridMap);
@@ -254,17 +258,111 @@ namespace ego_planner
              local_target_pt.x(), local_target_pt.y(), local_target_pt.z());
     
     bool use_mppi_topo_path = false;
+    bool use_parallel_mppi = pp_.use_parallel_mppi_optimization;  // New parameter for multi-path MPPI
+    
     if (topo_planner_ != nullptr && planWithTopo(start_pt, local_target_pt, topo_paths)) {
         ROS_INFO("[PlannerManager] Found %zu topological paths", topo_paths.size());
         
-        // Ensure we have valid paths before selecting best one
+        // Ensure we have valid paths before processing
         if (!topo_paths.empty()) {
-            // Select best topological path
-            TopoPath best_path = topo_planner_->selectBestPath(topo_paths);
-            ROS_INFO("[PlannerManager] Using topological path with cost %.3f", best_path.cost);
+            TopoPath best_path;
             
-            // Validate that the best path has sufficient waypoints
-            if (best_path.path.size() >= 2) {
+            // 🚀 NEW: Multi-path MPPI optimization
+            if (use_parallel_mppi && mppi_planner_ != nullptr && topo_paths.size() > 1) {
+                ROS_INFO("[PlannerManager] 🚀 Parallel MPPI: Optimizing all %zu topological paths...", topo_paths.size());
+                
+                struct MPPICandidate {
+                    TopoPath topo_path;
+                    MPPITrajectory mppi_result;
+                    double normalized_cost;
+                    bool success;
+                };
+                
+                std::vector<MPPICandidate> mppi_candidates;
+                Eigen::Vector3d current_vel = start_vel;
+                Eigen::Vector3d target_vel = local_target_vel;
+                
+                // Optimize each topological path with MPPI
+                for (size_t i = 0; i < topo_paths.size(); ++i) {
+                    MPPICandidate candidate;
+                    candidate.topo_path = topo_paths[i];
+                    candidate.success = false;
+                    candidate.normalized_cost = std::numeric_limits<double>::max();
+                    
+                    // Densify path if needed (for MPPI initial trajectory)
+                    std::vector<Eigen::Vector3d> dense_path = topo_paths[i].path;
+                    if (dense_path.size() < 7) {
+                        std::vector<Eigen::Vector3d> tmp_dense;
+                        for (size_t j = 0; j < dense_path.size() - 1; ++j) {
+                            tmp_dense.push_back(dense_path[j]);
+                            Eigen::Vector3d seg_vec = dense_path[j+1] - dense_path[j];
+                            double seg_len = seg_vec.norm();
+                            int num_inter = std::max(1, (int)(seg_len / (pp_.ctrl_pt_dist * 0.5)));
+                            for (int k = 1; k < num_inter; ++k) {
+                                double t = (double)k / num_inter;
+                                tmp_dense.push_back(dense_path[j] + t * seg_vec);
+                            }
+                        }
+                        tmp_dense.push_back(dense_path.back());
+                        dense_path = tmp_dense;
+                    }
+                    
+                    // Run MPPI on this path
+                    ROS_INFO("[PlannerManager]   Path %zu/%zu (topo_cost=%.3f, waypoints=%zu): Running MPPI...", 
+                             i+1, topo_paths.size(), topo_paths[i].cost, dense_path.size());
+                    
+                    bool mppi_success = planWithMPPI(start_pt, current_vel, local_target_pt, target_vel, candidate.mppi_result);
+                    
+                    if (mppi_success && candidate.mppi_result.positions.size() >= 7) {
+                        // Calculate normalized cost (cost per unit length)
+                        double path_length = 0.0;
+                        for (size_t j = 1; j < candidate.mppi_result.positions.size(); ++j) {
+                            path_length += (candidate.mppi_result.positions[j] - candidate.mppi_result.positions[j-1]).norm();
+                        }
+                        candidate.normalized_cost = (path_length > 0.1) ? (candidate.mppi_result.cost / path_length) : candidate.mppi_result.cost;
+                        candidate.success = true;
+                        
+                        ROS_INFO("[PlannerManager]   Path %zu: MPPI ✅ cost=%.3f, norm_cost=%.3f, length=%.2fm", 
+                                 i+1, candidate.mppi_result.cost, candidate.normalized_cost, path_length);
+                    } else {
+                        ROS_WARN("[PlannerManager]   Path %zu: MPPI ❌ failed", i+1);
+                    }
+                    
+                    mppi_candidates.push_back(candidate);
+                }
+                
+                // Select best MPPI result based on normalized cost
+                double best_norm_cost = std::numeric_limits<double>::max();
+                int best_idx = -1;
+                for (size_t i = 0; i < mppi_candidates.size(); ++i) {
+                    if (mppi_candidates[i].success && mppi_candidates[i].normalized_cost < best_norm_cost) {
+                        best_norm_cost = mppi_candidates[i].normalized_cost;
+                        best_idx = i;
+                    }
+                }
+                
+                if (best_idx >= 0) {
+                    ROS_INFO("[PlannerManager] 🏆 Best MPPI result: Path %d with normalized_cost=%.3f", 
+                             best_idx+1, best_norm_cost);
+                    
+                    // Use MPPI-optimized trajectory directly
+                    point_set = mppi_candidates[best_idx].mppi_result.positions;
+                    UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
+                    use_mppi_topo_path = true;
+                    
+                    ROS_INFO("[PlannerManager] Parallel MPPI optimization succeeded with %zu points", point_set.size());
+                } else {
+                    ROS_WARN("[PlannerManager] All MPPI optimizations failed, fallback to best topo path");
+                    best_path = topo_planner_->selectBestPath(topo_paths);
+                }
+            } else {
+                // Original single-path selection
+                best_path = topo_planner_->selectBestPath(topo_paths);
+                ROS_INFO("[PlannerManager] Using topological path with cost %.3f", best_path.cost);
+            }
+            
+            // If not using parallel MPPI or it failed, use traditional approach
+            if (!use_mppi_topo_path && best_path.path.size() >= 2) {
                 // Replace control points with topological path
                 point_set = best_path.path;
                 
@@ -292,7 +390,7 @@ namespace ego_planner
                 use_mppi_topo_path = true;
                 
                 ROS_INFO("[PlannerManager] Successfully integrated topological path with %zu waypoints", point_set.size());
-            } else {
+            } else if (!use_mppi_topo_path) {
                 ROS_WARN("[PlannerManager] Selected topological path has insufficient waypoints (%zu), using original approach", best_path.path.size());
             }
         } else {
@@ -311,7 +409,10 @@ namespace ego_planner
     /*** STEP 2: MPPI DYNAMIC OPTIMIZATION ***/
     // 🚀 Apply MPPI optimization to topological path (if available)
     // MPPI considers dynamics, ESDF, and control smoothness
-    if (use_mppi_topo_path && mppi_planner_ != nullptr) {
+    
+    // Note: If parallel MPPI was used in STEP 1.5, this step is skipped
+    // as MPPI optimization was already applied to all topological paths
+    if (use_mppi_topo_path && !use_parallel_mppi && mppi_planner_ != nullptr) {
         ROS_INFO("[PlannerManager] Applying MPPI dynamic optimization with ESDF...");
         
         Eigen::Vector3d current_vel = start_vel;
@@ -339,6 +440,8 @@ namespace ego_planner
         
         ros::Duration mppi_time = ros::Time::now() - t_start;
         ROS_INFO("[PlannerManager] MPPI optimization took %.3f ms", mppi_time.toSec() * 1000.0);
+    } else if (use_parallel_mppi) {
+        ROS_INFO("[PlannerManager] Skipping STEP 2: Parallel MPPI already applied in STEP 1.5");
     }
 
     t_start = ros::Time::now();

@@ -195,6 +195,9 @@ namespace ego_planner
     double ctrl_pt_dist;                  // distance between adjacient B-spline control points
     double feasibility_tolerance_;        // permitted ratio of vel/acc exceeding limits
     double planning_horizen_;
+    
+    /* 🚀 NEW: Multi-path MPPI optimization */
+    bool use_parallel_mppi_optimization;  // If true, optimize all topological paths with MPPI and select best
 
     /* processing time */
     double time_search_ = 0.0;

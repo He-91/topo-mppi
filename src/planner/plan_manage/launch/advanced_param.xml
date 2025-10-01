@@ -114,6 +114,18 @@
     <param name="manager/control_points_distance" value="0.4" type="double"/>
     <param name="manager/feasibility_tolerance" value="0.05" type="double"/>
     <param name="manager/planning_horizon" value="$(arg planning_horizon)" type="double"/>
+    
+    <!-- 🚀 NEW: Multi-path MPPI optimization -->
+    <!-- If true, optimize ALL topological paths with MPPI and select the best result -->
+    <!-- If false (default), only optimize the single best topological path -->
+    <param name="manager/use_parallel_mppi_optimization" value="true" type="bool"/>
+    
+  <!-- topological planning (TGK) -->
+    <param name="topo_prm/use_tgk_algorithm" value="true" type="bool"/>
+    <!-- Maximum topological paths to generate and optimize -->
+    <!-- Recommended: 3-5 for CPU, 5-10 for future GPU optimization -->
+    <!-- Trade-off: More paths = better global optimality but longer computation -->
+    <param name="topo_prm/max_topo_paths" value="5" type="int"/>
 
   <!-- trajectory optimization -->
     <param name="optimization/lambda_smooth" value="1.0" type="double"/>

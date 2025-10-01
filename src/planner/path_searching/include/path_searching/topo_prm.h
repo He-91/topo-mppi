@@ -12,6 +12,10 @@
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
 
+// 🚀 Phase 4: TGK-Planner integration
+#include "path_searching/bias_sampler.h"
+#include "path_searching/topo_graph_search.h"
+
 namespace ego_planner {
 
 struct TopoPath {
@@ -30,7 +34,12 @@ private:
     ros::Publisher topo_paths_pub_;
     std::string frame_id_;
     
-    // Parameters
+    // 🚀 Phase 4: TGK algorithm components
+    BiasSampler::Ptr bias_sampler_;
+    TopoGraphSearch::Ptr topo_graph_search_;
+    bool use_tgk_algorithm_;  // Flag to enable/disable TGK
+    
+    // Parameters (kept for backward compatibility)
     double step_size_;
     double search_radius_;
     int max_sample_num_;
