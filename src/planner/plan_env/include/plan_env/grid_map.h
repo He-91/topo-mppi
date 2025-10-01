@@ -90,6 +90,12 @@ struct MappingData {
   std::vector<double> occupancy_buffer_;
   std::vector<char> occupancy_buffer_inflate_;
 
+  // ESDF (Euclidean Signed Distance Field) data
+  // esdf_buffer_: distance to nearest obstacle (positive for free space)
+  // esdf_buffer_neg_: distance inside obstacles (negative values)
+  std::vector<double> esdf_buffer_;
+  std::vector<double> esdf_buffer_neg_;
+
   // camera position and pose data
 
   Eigen::Vector3d camera_pos_, last_camera_pos_;
@@ -176,6 +182,12 @@ public:
   inline double getResolution();
   Eigen::Vector3d getOrigin();
   int getVoxelNum();
+
+  // ESDF (Euclidean Signed Distance Field) operations
+  inline double getDistance(const Eigen::Vector3d& pos);
+  inline double getDistance(const Eigen::Vector3i& id);
+  inline double getDistanceWithGrad(const Eigen::Vector3d& pos, Eigen::Vector3d& grad);
+  void updateESDF();
 
   typedef std::shared_ptr<GridMap> Ptr;
 
@@ -395,5 +407,59 @@ inline void GridMap::inflatePoint(const Eigen::Vector3i& pt, int step, vector<Ei
 }
 
 inline double GridMap::getResolution() { return mp_.resolution_; }
+
+// ESDF inline function implementations
+
+inline double GridMap::getDistance(const Eigen::Vector3d& pos) {
+  if (!isInMap(pos)) {
+    return 0.0;
+  }
+  
+  Eigen::Vector3i id;
+  posToIndex(pos, id);
+  return getDistance(id);
+}
+
+inline double GridMap::getDistance(const Eigen::Vector3i& id) {
+  if (!isInMap(id)) {
+    return 0.0;
+  }
+  
+  int adr = toAddress(id);
+  
+  // Check if the voxel is occupied
+  if (md_.occupancy_buffer_inflate_[adr] == 1) {
+    // Inside obstacle, return negative distance
+    return -md_.esdf_buffer_neg_[adr];
+  } else {
+    // Free space, return positive distance to nearest obstacle
+    return md_.esdf_buffer_[adr];
+  }
+}
+
+inline double GridMap::getDistanceWithGrad(const Eigen::Vector3d& pos, Eigen::Vector3d& grad) {
+  if (!isInMap(pos)) {
+    grad.setZero();
+    return 0.0;
+  }
+  
+  // Compute gradient using finite differences
+  const double h = mp_.resolution_;
+  double dist_center = getDistance(pos);
+  
+  // Create offset vectors explicitly to avoid Eigen expression template ambiguity
+  Eigen::Vector3d pos_dx_plus = pos + Eigen::Vector3d(h, 0, 0);
+  Eigen::Vector3d pos_dx_minus = pos - Eigen::Vector3d(h, 0, 0);
+  Eigen::Vector3d pos_dy_plus = pos + Eigen::Vector3d(0, h, 0);
+  Eigen::Vector3d pos_dy_minus = pos - Eigen::Vector3d(0, h, 0);
+  Eigen::Vector3d pos_dz_plus = pos + Eigen::Vector3d(0, 0, h);
+  Eigen::Vector3d pos_dz_minus = pos - Eigen::Vector3d(0, 0, h);
+  
+  grad(0) = (getDistance(pos_dx_plus) - getDistance(pos_dx_minus)) / (2.0 * h);
+  grad(1) = (getDistance(pos_dy_plus) - getDistance(pos_dy_minus)) / (2.0 * h);
+  grad(2) = (getDistance(pos_dz_plus) - getDistance(pos_dz_minus)) / (2.0 * h);
+  
+  return dist_center;
+}
 
 #endif

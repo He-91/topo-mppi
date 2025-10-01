@@ -79,6 +79,10 @@ void GridMap::initMap(ros::NodeHandle &nh)
   md_.occupancy_buffer_ = vector<double>(buffer_size, mp_.clamp_min_log_ - mp_.unknown_flag_);
   md_.occupancy_buffer_inflate_ = vector<char>(buffer_size, 0);
 
+  // Initialize ESDF buffers with large distance values
+  md_.esdf_buffer_ = vector<double>(buffer_size, 10000.0);
+  md_.esdf_buffer_neg_ = vector<double>(buffer_size, 10000.0);
+
   md_.count_hit_and_miss_ = vector<short>(buffer_size, 0);
   md_.count_hit_ = vector<short>(buffer_size, 0);
   md_.flag_rayend_ = vector<char>(buffer_size, -1);
@@ -172,7 +176,11 @@ void GridMap::resetBuffer(Eigen::Vector3d min_pos, Eigen::Vector3d max_pos)
     for (int y = min_id(1); y <= max_id(1); ++y)
       for (int z = min_id(2); z <= max_id(2); ++z)
       {
-        md_.occupancy_buffer_inflate_[toAddress(x, y, z)] = 0;
+        int adr = toAddress(x, y, z);
+        md_.occupancy_buffer_inflate_[adr] = 0;
+        // Reset ESDF buffers to max distance
+        md_.esdf_buffer_[adr] = 10000.0;
+        md_.esdf_buffer_neg_[adr] = 10000.0;
       }
 }
 
@@ -641,6 +649,11 @@ void GridMap::clearAndInflateLocalMap()
         md_.occupancy_buffer_inflate_[toAddress(x, y, ceil_id)] = 1;
       }
   }
+
+  // Update ESDF after occupancy map inflation
+  // NOTE: This is called after obstacles are inflated, so ESDF will be computed
+  // based on the inflated occupancy map
+  updateESDF();
 }
 
 void GridMap::visCallback(const ros::TimerEvent & /*event*/)
@@ -1011,6 +1024,77 @@ void GridMap::depthOdomCallback(const sensor_msgs::ImageConstPtr &img,
   cv_ptr->image.copyTo(md_.depth_image_);
 
   md_.occ_need_update_ = true;
+}
+
+// ESDF Update Implementation
+void GridMap::updateESDF() {
+  // This is a simplified ESDF implementation using brute-force nearest obstacle search
+  // For better performance, consider using optimized algorithms like:
+  // - Incremental ESDF (Fiery Cushion, etc.)
+  // - Fast Sweeping Method
+  // - Distance Transform algorithms
+  
+  const int buffer_size = mp_.map_voxel_num_(0) * mp_.map_voxel_num_(1) * mp_.map_voxel_num_(2);
+  const double max_dist = 10.0;  // Maximum distance to compute (meters)
+  const int max_dist_voxels = std::ceil(max_dist / mp_.resolution_);
+  
+  // First pass: Find all obstacle voxels
+  std::vector<Eigen::Vector3i> obstacle_voxels;
+  obstacle_voxels.reserve(buffer_size / 10);  // Rough estimate
+  
+  for (int x = 0; x < mp_.map_voxel_num_(0); ++x) {
+    for (int y = 0; y < mp_.map_voxel_num_(1); ++y) {
+      for (int z = 0; z < mp_.map_voxel_num_(2); ++z) {
+        int adr = toAddress(x, y, z);
+        if (md_.occupancy_buffer_inflate_[adr] == 1) {
+          obstacle_voxels.push_back(Eigen::Vector3i(x, y, z));
+        }
+      }
+    }
+  }
+  
+  // Second pass: Compute distance for each voxel
+  for (int x = 0; x < mp_.map_voxel_num_(0); ++x) {
+    for (int y = 0; y < mp_.map_voxel_num_(1); ++y) {
+      for (int z = 0; z < mp_.map_voxel_num_(2); ++z) {
+        int adr = toAddress(x, y, z);
+        Eigen::Vector3i current_voxel(x, y, z);
+        
+        double min_dist = max_dist;
+        bool is_occupied = (md_.occupancy_buffer_inflate_[adr] == 1);
+        
+        // Search for nearest obstacle within max_dist_voxels
+        for (const auto& obs_voxel : obstacle_voxels) {
+          Eigen::Vector3i diff = current_voxel - obs_voxel;
+          
+          // Quick rejection test using L-infinity norm
+          if (std::abs(diff(0)) > max_dist_voxels || 
+              std::abs(diff(1)) > max_dist_voxels || 
+              std::abs(diff(2)) > max_dist_voxels) {
+            continue;
+          }
+          
+          // Compute Euclidean distance
+          double dist = diff.cast<double>().norm() * mp_.resolution_;
+          
+          if (dist < min_dist) {
+            min_dist = dist;
+          }
+        }
+        
+        // Store distance based on occupancy
+        if (is_occupied) {
+          // Inside obstacle: store in negative buffer
+          md_.esdf_buffer_neg_[adr] = min_dist;
+          md_.esdf_buffer_[adr] = 0.0;
+        } else {
+          // Free space: store in positive buffer
+          md_.esdf_buffer_[adr] = min_dist;
+          md_.esdf_buffer_neg_[adr] = 0.0;
+        }
+      }
+    }
+  }
 }
 
 // GridMap
