@@ -75,6 +75,7 @@ private:
                                   const Eigen::Vector3d& goal_vel);
     
     double obstacleCost(const Eigen::Vector3d& position);
+    double obstacleCost(const Eigen::Vector3d& position, double dist);  // ✅ Phase 3: ESDF-based cost
     double smoothnessCost(const MPPITrajectory& trajectory);
     double goalCost(const MPPITrajectory& trajectory,
                    const Eigen::Vector3d& goal_pos,

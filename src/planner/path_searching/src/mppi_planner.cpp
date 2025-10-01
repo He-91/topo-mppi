@@ -157,11 +157,14 @@ double MPPIPlanner::calculateTrajectoryCost(const MPPITrajectory& trajectory,
     double total_cost = 0.0;
     
     for (int t = 0; t < trajectory.size(); ++t) {
-        // Obstacle cost
-        total_cost += w_obstacle_ * obstacleCost(trajectory.positions[t]);
+        // ✅ Phase 3: Use ESDF for O(1) obstacle distance query
+        double dist = grid_map_->getDistance(trajectory.positions[t]);
         
-        // Check for collision - infinite cost if in collision
-        if (grid_map_->getInflateOccupancy(trajectory.positions[t])) {
+        // Obstacle cost - exponentially increase as we get closer
+        total_cost += w_obstacle_ * obstacleCost(trajectory.positions[t], dist);
+        
+        // Check for collision - infinite cost if inside obstacle (negative distance)
+        if (dist < 0.0) {
             return std::numeric_limits<double>::max();
         }
     }
@@ -179,28 +182,42 @@ double MPPIPlanner::calculateTrajectoryCost(const MPPITrajectory& trajectory,
 }
 
 double MPPIPlanner::obstacleCost(const Vector3d& position) {
-    // Sample around the position to compute distance to nearest obstacle
-    double min_dist = std::numeric_limits<double>::max();
-    double search_radius = 1.0;
-    double resolution = 0.2;
+    // ✅ Phase 3: Use ESDF for O(1) distance query instead of O(n³) sampling
+    double dist = grid_map_->getDistance(position);
+    return obstacleCost(position, dist);
+}
+
+double MPPIPlanner::obstacleCost(const Vector3d& position, double dist) {
+    // ✅ Phase 3: ESDF-based obstacle cost - O(1) instead of O(n³)
+    // 
+    // Previously: Sampled 11×11×11 = 1331 points around position (O(n³))
+    // Now: Single ESDF lookup (O(1)) - ~1000x faster!
+    //
+    // Cost function: Exponentially increases as distance decreases
+    // - dist > safety_distance: no cost (0.0)
+    // - dist < safety_distance: exponential cost increase
+    // - dist < 0: inside obstacle (handled in calculateTrajectoryCost)
     
-    for (double dx = -search_radius; dx <= search_radius; dx += resolution) {
-        for (double dy = -search_radius; dy <= search_radius; dy += resolution) {
-            for (double dz = -search_radius; dz <= search_radius; dz += resolution) {
-                Vector3d sample = position + Vector3d(dx, dy, dz);
-                if (grid_map_->getInflateOccupancy(sample)) {
-                    double dist = Vector3d(dx, dy, dz).norm();
-                    min_dist = std::min(min_dist, dist);
-                }
-            }
-        }
+    const double safety_distance = 1.0;  // Safe distance from obstacles (meters)
+    const double cost_scale = 1.0;       // Cost scaling factor
+    
+    if (dist >= safety_distance) {
+        return 0.0;  // Safe distance, no cost
     }
     
-    if (min_dist < search_radius) {
-        return 1.0 / (min_dist + 0.1); // Inverse distance cost
+    if (dist < 0.0) {
+        // Inside obstacle - return very high cost
+        // (infinite cost is handled in calculateTrajectoryCost)
+        return 1000.0;
     }
     
-    return 0.0;
+    // Exponential cost: cost = scale * exp(-dist / sigma)
+    // As dist → 0, cost → infinity
+    // As dist → safety_distance, cost → 0
+    double normalized_dist = dist / safety_distance;
+    double cost = cost_scale * std::exp(-normalized_dist * 5.0) / (dist + 0.01);
+    
+    return cost;
 }
 
 double MPPIPlanner::smoothnessCost(const MPPITrajectory& trajectory) {
