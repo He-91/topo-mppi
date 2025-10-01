@@ -232,16 +232,11 @@ namespace ego_planner
     Eigen::MatrixXd ctrl_pts;
     UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
 
-    // ✅ Fix Phase 1: Keep the original MPPI-optimized control points
-    // Problem: initControlPoints() initializes internal structures (cps_.resize, base_point, direction, etc.)
-    //          BUT also overwrites control points with linear interpolation from A* paths
-    // Solution: 1) Call initControlPoints to initialize internal structures
-    //           2) Immediately restore MPPI-optimized control points with setControlPoints
-    // This preserves MPPI's dynamic optimization while maintaining proper initialization
-    Eigen::MatrixXd mppi_optimized_ctrl_pts = ctrl_pts;  // Save MPPI result
+    // 🔧 Initialize B-spline optimizer internal structures
+    // Note: After architecture refactor (Topo→MPPI→BSpline), initControlPoints() now 
+    // initializes with topological/MPPI-optimized points, then BsplineOptimizer refines them
     vector<vector<Eigen::Vector3d>> a_star_pathes;
     a_star_pathes = bspline_optimizer_rebound_->initControlPoints(ctrl_pts, true);
-    bspline_optimizer_rebound_->setControlPoints(mppi_optimized_ctrl_pts);  // Restore MPPI optimization
 
     t_init = ros::Time::now() - t_start;
 
@@ -251,20 +246,22 @@ namespace ego_planner
     // No need for separate displayAStarList call
 
     /*** STEP 1.5: TOPOLOGICAL PLANNING ***/
+    // 🎯 Architecture: Topo → MPPI → B-spline
+    // Topological planning provides global collision-free paths
     std::vector<TopoPath> topo_paths;
     ROS_INFO("[PlannerManager] Attempting topological planning from [%.2f, %.2f, %.2f] to [%.2f, %.2f, %.2f]", 
              start_pt.x(), start_pt.y(), start_pt.z(), 
              local_target_pt.x(), local_target_pt.y(), local_target_pt.z());
     
-    bool use_topo_path = false;
+    bool use_mppi_topo_path = false;
     if (topo_planner_ != nullptr && planWithTopo(start_pt, local_target_pt, topo_paths)) {
         ROS_INFO("[PlannerManager] Found %zu topological paths", topo_paths.size());
         
         // Ensure we have valid paths before selecting best one
         if (!topo_paths.empty()) {
-            // Select best topological path and use it for control points generation
+            // Select best topological path
             TopoPath best_path = topo_planner_->selectBestPath(topo_paths);
-            ROS_INFO("[PlannerManager] Using topological path with cost %.3f for trajectory generation", best_path.cost);
+            ROS_INFO("[PlannerManager] Using topological path with cost %.3f", best_path.cost);
             
             // Validate that the best path has sufficient waypoints
             if (best_path.path.size() >= 2) {
@@ -292,7 +289,7 @@ namespace ego_planner
                 
                 // Re-parameterize control points using topological path
                 UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
-                use_topo_path = true;
+                use_mppi_topo_path = true;
                 
                 ROS_INFO("[PlannerManager] Successfully integrated topological path with %zu waypoints", point_set.size());
             } else {
@@ -311,9 +308,45 @@ namespace ego_planner
 
     t_start = ros::Time::now();
 
-    /*** STEP 2: OPTIMIZE ***/
+    /*** STEP 2: MPPI DYNAMIC OPTIMIZATION ***/
+    // 🚀 Apply MPPI optimization to topological path (if available)
+    // MPPI considers dynamics, ESDF, and control smoothness
+    if (use_mppi_topo_path && mppi_planner_ != nullptr) {
+        ROS_INFO("[PlannerManager] Applying MPPI dynamic optimization with ESDF...");
+        
+        Eigen::Vector3d current_vel = start_vel;
+        Eigen::Vector3d target_vel = local_target_vel;
+        
+        MPPITrajectory mppi_result;
+        bool mppi_success = planWithMPPI(start_pt, current_vel, local_target_pt, target_vel, mppi_result);
+        
+        if (mppi_success && mppi_result.positions.size() >= 7) {
+            ROS_INFO("[PlannerManager] MPPI optimization succeeded with %zu points, using as control points", 
+                     mppi_result.positions.size());
+            
+            // Replace control points with MPPI-optimized trajectory
+            point_set = mppi_result.positions;
+            
+            // Re-parameterize to B-spline with MPPI result
+            UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
+            
+            ROS_INFO("[PlannerManager] MPPI control points integrated successfully");
+        } else {
+            ROS_WARN("[PlannerManager] MPPI optimization failed or insufficient points (%zu), using topo path", 
+                     mppi_result.positions.size());
+            // Fallback: keep original topological path control points
+        }
+        
+        ros::Duration mppi_time = ros::Time::now() - t_start;
+        ROS_INFO("[PlannerManager] MPPI optimization took %.3f ms", mppi_time.toSec() * 1000.0);
+    }
+
+    t_start = ros::Time::now();
+
+    /*** STEP 3: B-SPLINE SMOOTHING ***/
+    // 🎨 Final smoothing and collision avoidance refinement
     bool flag_step_1_success = bspline_optimizer_rebound_->BsplineOptimizeTrajRebound(ctrl_pts, ts);
-    cout << "first_optimize_step_success=" << flag_step_1_success << endl;
+    cout << "bspline_optimize_success=" << flag_step_1_success << endl;
     if (!flag_step_1_success)
     {
       // visualization_->displayOptimalList( ctrl_pts, vis_id );
@@ -324,40 +357,10 @@ namespace ego_planner
 
     t_opt = ros::Time::now() - t_start;
 
-    /*** STEP 2.5: MPPI LOCAL OPTIMIZATION ***/
-    if (use_topo_path && mppi_planner_ != nullptr) {
-        t_start = ros::Time::now();
-        
-        ROS_INFO("[PlannerManager] Applying MPPI local optimization...");
-        
-        // Extract trajectory from B-spline for MPPI refinement
-        UniformBspline temp_spline(ctrl_pts, 3, ts);
-        
-        // Use MPPI to refine the trajectory locally
-        Eigen::Vector3d current_vel = start_vel;
-        Eigen::Vector3d target_vel = local_target_vel;
-        
-        MPPITrajectory mppi_result;
-        bool mppi_success = planWithMPPI(start_pt, current_vel, local_target_pt, target_vel, mppi_result);
-        
-        if (mppi_success) {
-            ROS_INFO("[PlannerManager] MPPI optimization succeeded, integrating with B-spline result");
-            
-            // Blend MPPI result with B-spline trajectory
-            // For now, we keep the B-spline but this could be enhanced to blend trajectories
-            // Future enhancement: could replace first few waypoints with MPPI result
-            
-        } else {
-            ROS_WARN("[PlannerManager] MPPI optimization failed, using B-spline result only");
-        }
-        
-        ros::Duration mppi_time = ros::Time::now() - t_start;
-        ROS_INFO("[PlannerManager] MPPI optimization took %.3f ms", mppi_time.toSec() * 1000.0);
-    }
-
     t_start = ros::Time::now();
 
-    /*** STEP 3: REFINE(RE-ALLOCATE TIME) IF NECESSARY ***/
+    /*** STEP 4: TIME REALLOCATION FOR FEASIBILITY ***/
+    // ⏱️ Adjust time allocation to satisfy velocity/acceleration constraints
     UniformBspline pos = UniformBspline(ctrl_pts, 3, ts);
     pos.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_, pp_.feasibility_tolerance_);
 
