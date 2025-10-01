@@ -80,6 +80,10 @@ namespace ego_planner
     std::vector<std::vector<Eigen::Vector3d>> initControlPoints(Eigen::MatrixXd &init_points, bool flag_first_init = true);
     bool BsplineOptimizeTrajRebound(Eigen::MatrixXd &optimal_points, double ts); // must be called after initControlPoints()
     bool BsplineOptimizeTrajRefine(const Eigen::MatrixXd &init_points, const double ts, Eigen::MatrixXd &optimal_points);
+    
+    // 🔧 Phase 4.5.1: Lightweight optimization mode (smoothing only, no obstacle re-optimization)
+    void setLightweightMode(bool enable) { lightweight_mode_ = enable; }
+    bool BsplineOptimizeTrajLightweight(Eigen::MatrixXd &optimal_points, double ts); // Smoothing only mode
 
     inline int getOrder(void) { return order_; }
 
@@ -118,6 +122,9 @@ namespace ego_planner
     //
     double dist0_;             // safe distance
     double max_vel_, max_acc_; // dynamic limits
+    
+    // 🔧 Phase 4.5.1: Lightweight mode flag
+    bool lightweight_mode_ = false;  // If true, only smooth without obstacle optimization
 
     int variable_num_;              // optimization variables
     int iter_num_;                  // iteration of the solver

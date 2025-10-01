@@ -388,6 +388,226 @@ rostopic hz /grid_map/occupancy
 
 ---
 
+## 🔧 Phase 4.5.1: 最新优化与修复
+
+**更新日期**: 2025-10-01
+
+### 修复1: TGK Corner Detection阈值调整 ⚠️
+
+**问题**: 日志分析显示TGK成功率0%（18次尝试全部失败），原因是corner detection阈值过严。
+
+**解决方案**: 进一步放宽距离阈值
+
+```cpp
+// src/planner/path_searching/src/bias_sampler.cpp line 152
+// 原值: sampling_radius_ * 1.5  (3.0m)
+// 新值: sampling_radius_ * 2.0  (4.0m)  ← Phase 4.5.1修复
+if (dist > sampling_radius_ * 2.0) {
+    return false;  // Too far from obstacles
+}
+```
+
+**配置参数** (advanced_param.xml):
+```xml
+<!-- TGK算法参数（可选调整）-->
+<param name="tgk/sampling_radius" value="2.0" type="double"/>  
+<!-- 实际阈值 = sampling_radius × 2.0 = 4.0m -->
+```
+
+**预期改进**:
+| 指标 | 修复前 | 修复后 | 改进 |
+|------|--------|--------|------|
+| TGK成功率 | 0% | 40-60% | ↑40-60% |
+| Key points | 0个 | 5-15个 | ↑5-15个 |
+| 多路径触发率 | 低 | 高 | 显著提升 |
+
+**验证方法**:
+```bash
+roslaunch plan_manage run_in_sim.launch
+# 观察日志中的:
+# [TopoGraphSearch] Building graph with X key points
+# X应该从0增加到5-15
+```
+
+### 优化2: B-spline轻量级模式（设计文档）📝
+
+**问题**: B-spline优化失败率~25%，与MPPI优化结果冲突。
+
+**根本原因**: 
+- MPPI已优化障碍物
+- B-spline再次优化导致冲突
+- 违反理想架构（Layer 3应该只做平滑）
+
+**解决方案**: 实施B-spline轻量级模式
+
+**设计文档**: 详见 `BSPLINE_LIGHTWEIGHT_MODE_DESIGN.md`
+
+**关键配置** (未来实施):
+```xml
+<!-- B-spline轻量级模式（Phase 4.5.1规划）-->
+<param name="manager/use_lightweight_bspline" value="true" type="bool"/>
+<param name="optimization/lightweight_lambda_smooth" value="10.0" type="double"/>
+<param name="optimization/lightweight_lambda_collision" value="0.0" type="double"/>
+<param name="optimization/lightweight_max_iteration" value="20" type="int"/>
+```
+
+**预期改进**:
+| 指标 | 当前 | 轻量级 | 改进 |
+|------|------|--------|------|
+| 成功率 | 75% | 90%+ | ↑15%+ |
+| 平均耗时 | 2-3ms | 0.5-1ms | ↓50-70% |
+| Rebound次数 | 5-15次 | 0-3次 | ↓80% |
+
+**实施状态**: 📝 设计完成，代码实现待用户验证后进行
+
+---
+
+## 🐛 Troubleshooting（故障排查）
+
+### 问题1: TGK始终失败，0 key points
+
+**症状**:
+```
+[WARN] [TopoGraphSearch] Building graph with 0 key points
+[WARN] [TopoGraphSearch] A* search failed
+[WARN] [TopoPRM-TGK] TGK search failed, falling back to legacy method
+```
+
+**原因**: Corner detection距离阈值过严
+
+**解决**:
+```xml
+<!-- 方案1: 增加sampling_radius（推荐）-->
+<param name="tgk/sampling_radius" value="2.5" type="double"/>  <!-- 从2.0增加到2.5 -->
+
+<!-- 方案2: 修改bias_sampler.cpp中的倍数（已在Phase 4.5.1修复）-->
+<!-- if (dist > sampling_radius_ * 2.0) → 2.5 or 3.0 -->
+```
+
+**验证**: 重新编译运行，观察key points从0增加到5+
+
+### 问题2: 并行MPPI触发率低，多数是单条路径
+
+**症状**:
+```
+[INFO] Found 1 topological paths  ← 只有1条路径
+[INFO] Using topological path with cost 31.909
+```
+
+**原因**: 
+- TGK失败（见问题1）
+- Legacy方法生成路径数量少
+
+**解决**:
+```xml
+<!-- 1. 修复TGK（见问题1）-->
+<!-- 2. 增加Legacy采样次数 -->
+<param name="topo_prm/sample_inflate_x" value="2.5" type="double"/>  <!-- 增加采样范围 -->
+<param name="topo_prm/clearance" value="0.5" type="double"/>         <!-- 降低间隙要求 -->
+```
+
+### 问题3: B-spline优化频繁失败
+
+**症状**:
+```
+iter=104,time(ms)=0.85,rebound.
+bspline_optimize_success=0
+final_plan_success=0
+```
+
+**原因**: 
+- 环境复杂
+- B-spline与MPPI结果冲突
+
+**临时解决**（立即可用）:
+```xml
+<!-- 降低B-spline优化强度 -->
+<param name="optimization/lambda_collision" value="0.5" type="double"/>  <!-- 从1.0降到0.5 -->
+<param name="optimization/max_iteration" value="50" type="int"/>         <!-- 减少迭代 -->
+```
+
+**长期解决**（Phase 4.5.1规划）:
+- 实施B-spline轻量级模式（见优化2）
+- 当`use_parallel_mppi_optimization=true`时自动启用
+
+### 问题4: 规划时间超过100ms
+
+**症状**:
+```
+[INFO] Total planning time: 150ms  ← 超过实时要求
+```
+
+**原因**: 路径数量过多
+
+**解决**:
+```xml
+<!-- 减少拓扑路径数量 -->
+<param name="topo_prm/max_topo_paths" value="3" type="int"/>  <!-- 从5降到3 -->
+
+<!-- 或减少MPPI采样数 -->
+<param name="mppi/num_samples" value="800" type="int"/>  <!-- 从1000降到800 -->
+```
+
+### 问题5: 路径质量不佳，碰撞风险高
+
+**症状**: 
+- 轨迹接近障碍物
+- 安全裕度不足
+
+**解决**:
+```xml
+<!-- 增加安全距离 -->
+<param name="optimization/dist0" value="0.6" type="double"/>  <!-- 从0.5增加到0.6 -->
+
+<!-- 增加MPPI障碍物惩罚 -->
+<param name="mppi/lambda_obstacle" value="1.5" type="double"/>  <!-- 从1.0增加到1.5 -->
+```
+
+---
+
+## 📊 性能监控
+
+### 关键日志指标
+
+**1. 拓扑规划**:
+```
+[INFO] Found X topological paths  ← 期望: X ≥ 3
+```
+
+**2. 并行MPPI**:
+```
+[INFO] 🚀 Parallel MPPI: Optimizing all X topological paths...
+[INFO] 🏆 Best MPPI result: Path Y with normalized_cost=Z
+```
+- 期望: X = 3-7条路径
+- Z值越低越好（通常100-250范围）
+
+**3. TGK状态**:
+```
+[INFO] [TopoGraphSearch] Building graph with X key points
+```
+- ✅ 成功: X ≥ 5
+- ⚠️ 警告: X = 1-4
+- ❌ 失败: X = 0（需要修复corner detection）
+
+**4. B-spline优化**:
+```
+bspline_optimize_success=1  ← 期望: 成功率 > 80%
+total time:X ms              ← 期望: X < 5ms
+```
+
+### 性能基准
+
+| 指标 | 目标值 | 当前实现 | Phase 4.5.1目标 |
+|------|--------|----------|----------------|
+| 总规划时间 | < 100ms | ~50-150ms | < 80ms |
+| MPPI单路径 | < 20ms | ~3ms ✅ | ~3ms |
+| TGK成功率 | > 60% | 0% ❌ | 40-60% |
+| B-spline成功率 | > 90% | 75% ⚠️ | 90%+ |
+| 拓扑路径数 | 3-7条 | 1-11条 | 3-7条稳定 |
+
+---
+
 **作者**: AI系统架构师  
-**版本**: 1.0  
+**版本**: 1.1 (Phase 4.5.1更新)  
 **更新**: 2025-10-01

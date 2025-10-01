@@ -147,10 +147,11 @@ bool BiasSampler::isCornerPoint(const Vector3d& pos) {
     Vector3d grad;
     double dist = grid_map_->getDistanceWithGrad(pos, grad);
     
-    // 🔧 Phase 4.5: 放宽距离阈值（原来1.0m太严格，改为3.0m）
-    // 原因：0 key points → TGK失败 → 降级到legacy
-    // 修复：接受更远的点作为潜在角点
-    if (dist > sampling_radius_ * 1.5) {  // 2.0m × 1.5 = 3.0m
+    // 🔧 Phase 4.5.1: 进一步放宽距离阈值（1.5 → 2.0倍）
+    // 日志分析：1.5倍仍然导致0 key points（100%失败率）
+    // 新阈值：2.0m × 2.0 = 4.0m（从3.0m放宽到4.0m）
+    // 预期：TGK成功率从0%提升到40-60%，key points从0增加到5-15个
+    if (dist > sampling_radius_ * 2.0) {  // 2.0m × 2.0 = 4.0m
         return false;  // Too far from obstacles
     }
     
