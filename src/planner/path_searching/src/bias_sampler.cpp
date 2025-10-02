@@ -137,45 +137,82 @@ bool BiasSampler::isCornerPoint(const Vector3d& pos) {
     // A corner point is at the boundary between free and occupied space
     // AND has high gradient variation (concave/convex geometry)
     
+    // 🔧 Phase 4.5.1.5: 添加详细调试日志（诊断为什么TGK 100%失败）
+    static int total_attempts = 0;
+    static int passed_check1 = 0, passed_check2 = 0, passed_check3 = 0;
+    static int check1_failures = 0, check2_failures = 0, check3_failures = 0;
+    total_attempts++;
+    
     // Check 1: Must be collision-free
     if (!isCollisionFree(pos)) {
+        check1_failures++;
+        if (total_attempts % 100 == 0) {
+            ROS_WARN_THROTTLE(5.0, "[TGK Corner] 统计: 尝试=%d, ✅通过1=%d ✅通过2=%d ✅通过3=%d | ❌失败1=%d ❌失败2=%d ❌失败3=%d",
+                          total_attempts, passed_check1, passed_check2, passed_check3,
+                          check1_failures, check2_failures, check3_failures);
+        }
         return false;
     }
+    passed_check1++;
     
-    // Check 2: Must be close to obstacles (near boundary)
-    // 🔧 Phase 4: Use getDistanceWithGrad (our ESDF API)
-    Vector3d grad;
-    double dist = grid_map_->getDistanceWithGrad(pos, grad);
+    // Check 2: Must be near obstacle boundary (geometric check)
+    // 🔧 Phase 4.5.1.7: 移除ESDF依赖，改用纯几何检查（回归TGK原始设计）
+    // 原问题：getDistanceWithGrad()在传感器视野外返回10000.0m异常值
+    // 新方法：在周围采样检查free/occupied混合 → 更鲁棒、更符合TGK论文
     
-    // 🔧 Phase 4.5.1: 进一步放宽距离阈值（1.5 → 2.0倍）
-    // 日志分析：1.5倍仍然导致0 key points（100%失败率）
-    // 新阈值：2.0m × 2.0 = 4.0m（从3.0m放宽到4.0m）
-    // 预期：TGK成功率从0%提升到40-60%，key points从0增加到5-15个
-    if (dist > sampling_radius_ * 2.0) {  // 2.0m × 2.0 = 4.0m
-        return false;  // Too far from obstacles
-    }
+    int free_count = 0;
+    int occupied_count = 0;
+    double check_radius = resolution_ * 3.0;  // 检查半径：3个grid单元
     
-    // Check 3: Must have multiple obstacle directions nearby (corner feature)
-    // Sample 8 directions around the point
-    vector<bool> occupied_dirs;
-    double check_dist = resolution_ * 2.0;
-    
+    // 在8个方向采样
     for (double theta = 0; theta < 2 * M_PI; theta += M_PI / 4) {
         Vector3d dir(cos(theta), sin(theta), 0.0);
-        Vector3d check_pt = pos + check_dist * dir;
-        occupied_dirs.push_back(!isCollisionFree(check_pt));
-    }
-    
-    // Count transitions from free to occupied
-    int transitions = 0;
-    for (size_t i = 0; i < occupied_dirs.size(); ++i) {
-        if (occupied_dirs[i] != occupied_dirs[(i + 1) % occupied_dirs.size()]) {
-            transitions++;
+        Vector3d check_pt = pos + check_radius * dir;
+        
+        if (isCollisionFree(check_pt)) {
+            free_count++;
+        } else {
+            occupied_count++;
         }
     }
     
-    // A corner should have at least 2 transitions (meaning multiple obstacle edges meet)
-    return transitions >= 2;
+    // 如果周围既有free又有occupied → 在边界附近
+    bool near_boundary = (free_count > 0 && occupied_count > 0);
+    
+    if (!near_boundary) {
+        check2_failures++;
+        if (passed_check1 % 100 == 0) {
+            ROS_WARN_THROTTLE(5.0, "[TGK Corner] 条件2失败（远离边界）: free=%d, occupied=%d | 统计: 尝试=%d, 通过1=%d, 失败2=%d",
+                          free_count, occupied_count, total_attempts, passed_check1, check2_failures);
+        }
+        return false;  // Not near boundary
+    }
+    passed_check2++;
+    
+    // Check 3: Must have corner/concave feature (geometric check)
+    // 🔧 Phase 4.5.1.7: 简化条件3，只需要有障碍物即可（不要求严格的角点）
+    // 原条件：transitions >= 2（需要完整的角）
+    // 新条件：occupied_count >= 2（任意边界点都可以）
+    // 理由：在稀疏环境中，任何边界点都可能是拓扑关键点
+    
+    // 复用条件2的采样结果（已经有free_count和occupied_count）
+    // 只需要至少2个方向有障碍物
+    if (occupied_count < 2) {
+        check3_failures++;
+        if (passed_check2 % 50 == 0) {
+            ROS_WARN_THROTTLE(5.0, "[TGK Corner] 条件3失败（障碍物不足）: occupied=%d < 2 | 统计: 尝试=%d, 通过1=%d, 通过2=%d, 失败3=%d",
+                          occupied_count, total_attempts, passed_check1, passed_check2, check3_failures);
+        }
+        return false;
+    }
+    passed_check3++;
+    
+    // 🎉 成功找到corner point！
+    ROS_INFO("[TGK Corner] ✅ 找到corner point! pos=(%.2f,%.2f,%.2f), free=%d, occupied=%d | 总统计: %d/%d/%d/%d (总/过1/过2/过3)",
+             pos.x(), pos.y(), pos.z(), free_count, occupied_count,
+             total_attempts, passed_check1, passed_check2, passed_check3);
+    
+    return true;
 }
 
 SamplingSpace BiasSampler::buildSamplingSpace(const Vector3d& corner, int topo_id) {

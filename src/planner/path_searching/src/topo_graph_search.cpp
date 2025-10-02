@@ -9,7 +9,7 @@ namespace ego_planner {
 
 TopoGraphSearch::TopoGraphSearch()
     : max_search_nodes_(1000),
-      connection_radius_(3.0),
+      connection_radius_(10.0),  // 🔧 Phase 4.5.1.8: Increase from 3.0m to 10.0m for long-range paths
       path_pruning_threshold_(0.5),
       max_topo_paths_(5),
       node_counter_(0) {
@@ -218,51 +218,80 @@ bool TopoGraphSearch::astarSearch(const Vector3d& start,
 void TopoGraphSearch::extractMultiplePaths(const Vector3d& start,
                                           const Vector3d& goal,
                                           vector<vector<Vector3d>>& paths) {
-    // For now, just find one best path
-    // TODO: Implement k-shortest paths algorithm for multiple topo paths
+    paths.clear();
     
-    vector<Vector3d> best_path;
-    if (astarSearch(start, goal, best_path)) {
-        smoothPath(best_path);
-        paths.push_back(best_path);
-        ROS_INFO("[TopoGraphSearch] Extracted path with %zu waypoints", best_path.size());
-    } else {
-        ROS_WARN("[TopoGraphSearch] A* search failed, trying direct path");
+    // Step 1: Find first path
+    vector<Vector3d> first_path;
+    if (!astarSearch(start, goal, first_path)) {
+        ROS_WARN("[TopoGraphSearch] Failed to find first path");
         // Fallback: try direct path
         if (isPathFree(start, goal)) {
             vector<Vector3d> direct_path = {start, goal};
             paths.push_back(direct_path);
             ROS_INFO("[TopoGraphSearch] Using direct fallback path");
         }
+        return;
     }
     
-    // Try to find alternative paths by penalizing nodes in the first path
-    // This is a simplified approach - TGK uses more sophisticated method
-    vector<bool> penalized_nodes(node_pool_.size(), false);
+    smoothPath(first_path);
+    paths.push_back(first_path);
+    ROS_INFO("[TopoGraphSearch] Path 1: %zu waypoints", first_path.size());
     
-    // Mark middle nodes of best path as penalized
-    if (!best_path.empty() && best_path.size() > 2) {
-        for (size_t i = 1; i < best_path.size() - 1; ++i) {
-            for (size_t j = 0; j < node_pool_.size(); ++j) {
-                if ((node_pool_[j].pos - best_path[i]).norm() < connection_radius_ * 0.3) {
-                    penalized_nodes[j] = true;
-                }
+    // Step 2: Find alternative paths by blocking nodes from first path
+    // This forces the search to find topologically different paths
+    int max_paths = max_topo_paths_;  // Target: 3-5 paths (configurable)
+    
+    for (int attempt = 1; attempt < max_paths && first_path.size() >= 3; attempt++) {
+        // Choose a node to block from the first path
+        // Use different positions to get diverse paths
+        size_t block_idx = (first_path.size() * attempt) / (max_paths + 1);
+        Vector3d blocked_pos = first_path[block_idx];
+        
+        // Find the closest key point to block
+        int blocked_node_id = -1;
+        double min_dist = std::numeric_limits<double>::max();
+        for (size_t i = 2; i < node_pool_.size() - 1; i++) {  // Skip start(0), goal(1), and last added nodes
+            double dist = (node_pool_[i].pos - blocked_pos).norm();
+            if (dist < min_dist) {
+                min_dist = dist;
+                blocked_node_id = i;
             }
         }
+        
+        if (blocked_node_id < 0 || min_dist > 2.0) {
+            continue;  // No close node found
+        }
+        
+        // Temporarily remove this node
+        TopoNode backup_node = node_pool_[blocked_node_id];
+        node_pool_.erase(node_pool_.begin() + blocked_node_id);
+        
+        // Try to find alternative path
+        vector<Vector3d> alt_path;
+        if (astarSearch(start, goal, alt_path)) {
+            // Check if this path is significantly different
+            bool is_different = true;
+            for (const auto& existing_path : paths) {
+                if (arePathsSimilar(alt_path, existing_path)) {
+                    is_different = false;
+                    break;
+                }
+            }
+            
+            if (is_different) {
+                smoothPath(alt_path);
+                paths.push_back(alt_path);
+                ROS_INFO("[TopoGraphSearch] Path %zu: %zu waypoints (blocked node at [%.2f, %.2f, %.2f])", 
+                         paths.size(), alt_path.size(),
+                         blocked_pos.x(), blocked_pos.y(), blocked_pos.z());
+            }
+        }
+        
+        // Restore the node
+        node_pool_.insert(node_pool_.begin() + blocked_node_id, backup_node);
     }
     
-    // Search for alternative paths (simplified)
-    for (int attempt = 0; attempt < max_topo_paths_ - 1; ++attempt) {
-        vector<Vector3d> alt_path;
-        
-        // Temporarily increase cost for penalized nodes
-        // (In a full implementation, modify the graph structure)
-        
-        // For now, just check if we can find direct or simple alternatives
-        // This is a placeholder for more sophisticated multi-path search
-        
-        break;  // Exit after first path for now
-    }
+    ROS_INFO("[TopoGraphSearch] Generated %zu topological paths", paths.size());
 }
 
 double TopoGraphSearch::heuristic(const Vector3d& pos, const Vector3d& goal) {
@@ -275,13 +304,21 @@ double TopoGraphSearch::edgeCost(const Vector3d& from, const Vector3d& to) {
     
     // Add penalty for proximity to obstacles
     // 🔧 Phase 4: Use getDistanceWithGrad (our ESDF API)
-    double obs_penalty = 0.0;
     Vector3d mid = (from + to) / 2.0;
     Vector3d edt_grad;
     double edt_dist = grid_map_->getDistanceWithGrad(mid, edt_grad);
     
-    if (edt_dist < 0.5) {
-        obs_penalty = (0.5 - edt_dist) * 2.0;
+    // 🔧 Phase 4.5.1.10: Filter abnormal ESDF values (unobserved regions)
+    // ESDF returns 10000.0m for unobserved regions → treat as safe
+    if (edt_dist > 100.0) {
+        return dist;  // No penalty for unobserved regions (conservative)
+    }
+    
+    // Normal region: penalize proximity to obstacles
+    // Use 1.0m threshold (more lenient than 0.5m) for better path diversity
+    double obs_penalty = 0.0;
+    if (edt_dist < 1.0) {
+        obs_penalty = (1.0 - edt_dist) * 2.0;
     }
     
     return dist + obs_penalty;
@@ -301,10 +338,17 @@ bool TopoGraphSearch::canConnect(const Vector3d& from, const Vector3d& to) {
 bool TopoGraphSearch::isPathFree(const Vector3d& from, const Vector3d& to) {
     Vector3d dir = to - from;
     double dist = dir.norm();
+    
+    if (dist < 1e-6) {
+        return true;  // Same point
+    }
+    
     dir.normalize();
     
-    double step = 0.05;  // 5cm resolution
+    // 🔧 Phase 4.5.1.9: Increase step size from 0.05m to 0.2m for long-range connections
+    double step = 0.2;  // 20cm resolution (was 5cm, too strict for long connections)
     int num_checks = static_cast<int>(dist / step);
+    if (num_checks < 1) num_checks = 1;
     
     for (int i = 0; i <= num_checks; ++i) {
         Vector3d check_pt = from + (dist * i / num_checks) * dir;
