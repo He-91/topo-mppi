@@ -152,7 +152,7 @@ public:
   inline void posToIndex(const Eigen::Vector3d& pos, Eigen::Vector3i& id);
   inline void indexToPos(const Eigen::Vector3i& id, Eigen::Vector3d& pos);
   inline int toAddress(const Eigen::Vector3i& id);
-  inline int toAddress(int& x, int& y, int& z);
+  inline int toAddress(int x, int y, int z);
   inline bool isInMap(const Eigen::Vector3d& pos);
   inline bool isInMap(const Eigen::Vector3i& idx);
 
@@ -253,7 +253,7 @@ inline int GridMap::toAddress(const Eigen::Vector3i& id) {
   return id(0) * mp_.map_voxel_num_(1) * mp_.map_voxel_num_(2) + id(1) * mp_.map_voxel_num_(2) + id(2);
 }
 
-inline int GridMap::toAddress(int& x, int& y, int& z) {
+inline int GridMap::toAddress(int x, int y, int z) {
   return x * mp_.map_voxel_num_(1) * mp_.map_voxel_num_(2) + y * mp_.map_voxel_num_(2) + z;
 }
 

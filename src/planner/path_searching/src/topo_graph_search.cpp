@@ -258,7 +258,9 @@ void TopoGraphSearch::extractMultiplePaths(const Vector3d& start,
             }
         }
         
-        if (blocked_node_id < 0 || min_dist > 2.0) {
+        // Phase 4.5.1.11: Relaxed from 2.0m to 3.0m for better alternative path discovery
+        // (5.0m was too loose, causing incorrect node blocking)
+        if (blocked_node_id < 0 || min_dist > 3.0) {
             continue;  // No close node found
         }
         
@@ -345,8 +347,11 @@ bool TopoGraphSearch::isPathFree(const Vector3d& from, const Vector3d& to) {
     
     dir.normalize();
     
-    // 🔧 Phase 4.5.1.9: Increase step size from 0.05m to 0.2m for long-range connections
-    double step = 0.2;  // 20cm resolution (was 5cm, too strict for long connections)
+    // 🔧 Phase 4.5.1.11: Use adaptive step size based on distance
+    // For short connections (<3m): 0.08m for safety (obstacles)
+    // For long connections (>3m): 0.12m for balance (performance vs safety)
+    // Increased safety margin from 0.1/0.15 to avoid thin obstacle penetration
+    double step = (dist < 3.0) ? 0.08 : 0.12;
     int num_checks = static_cast<int>(dist / step);
     if (num_checks < 1) num_checks = 1;
     

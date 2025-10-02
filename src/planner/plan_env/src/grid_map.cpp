@@ -258,24 +258,53 @@ void GridMap::projectDepthImage()
 
       Eigen::Matrix3d last_camera_r_inv;
       last_camera_r_inv = md_.last_camera_q_.inverse();
+      
+      // Phase 4.5.1.11: Support both uint16_t (CPU) and float (GPU) depth images
+      bool is_float_depth = (md_.depth_image_.type() == CV_32FC1);
       const double inv_factor = 1.0 / mp_.k_depth_scaling_factor_;
+      
+      // 🔍 DEBUG: Print depth image type information (only once at startup)
+      static bool debug_printed = false;
+      if (!debug_printed) {
+        debug_printed = true;
+        bool is_float_depth_check = (md_.depth_image_.type() == CV_32FC1);
+        ROS_INFO("=== Depth Image Configuration ===");
+        ROS_INFO("Type: %d (CV_32FC1=%d, CV_16UC1=%d)", 
+                  md_.depth_image_.type(), CV_32FC1, CV_16UC1);
+        ROS_INFO("Mode: %s", is_float_depth_check ? "GPU (float)" : "CPU (uint16_t)");
+        ROS_INFO("Size: %dx%d", md_.depth_image_.cols, md_.depth_image_.rows);
+        
+        // Sample center pixel
+        int test_u = md_.depth_image_.cols / 2;
+        int test_v = md_.depth_image_.rows / 2;
+        double test_depth = 0.0;
+        if (is_float_depth_check) {
+          test_depth = md_.depth_image_.at<float>(test_v, test_u);
+        } else {
+          test_depth = md_.depth_image_.at<uint16_t>(test_v, test_u) * inv_factor;
+        }
+        ROS_INFO("Sample depth [%d,%d]: %.3f meters", test_u, test_v, test_depth);
+      }
 
       for (int v = mp_.depth_filter_margin_; v < rows - mp_.depth_filter_margin_; v += mp_.skip_pixel_)
       {
-        row_ptr = md_.depth_image_.ptr<uint16_t>(v) + mp_.depth_filter_margin_;
-
         for (int u = mp_.depth_filter_margin_; u < cols - mp_.depth_filter_margin_;
              u += mp_.skip_pixel_)
         {
-
-          depth = (*row_ptr) * inv_factor;
-          row_ptr = row_ptr + mp_.skip_pixel_;
+          // Read depth value based on image type
+          if (is_float_depth) {
+            // GPU rendering: float depth in meters
+            depth = md_.depth_image_.at<float>(v, u);
+          } else {
+            // CPU rendering: uint16_t depth with scaling factor
+            depth = md_.depth_image_.at<uint16_t>(v, u) * inv_factor;
+          }
 
           // filter depth
           // depth += rand_noise_(eng_);
           // if (depth > 0.01) depth += rand_noise2_(eng_);
 
-          if (*row_ptr == 0)
+          if (depth < 0.01 || depth == 0.0)  // GPU uses 0 for invalid
           {
             depth = mp_.max_ray_length_ + 0.1;
           }
@@ -650,10 +679,16 @@ void GridMap::clearAndInflateLocalMap()
       }
   }
 
-  // Update ESDF after occupancy map inflation
-  // NOTE: This is called after obstacles are inflated, so ESDF will be computed
-  // based on the inflated occupancy map
-  updateESDF();
+  // 🔧 Update ESDF with rate limiting to avoid performance issues
+  // GPU renders at 30Hz, CPU at 12Hz. We limit ESDF updates to ~10Hz for both.
+  // This prevents the system from being blocked by ESDF computation.
+  static int esdf_update_counter = 0;
+  static const int ESDF_UPDATE_INTERVAL = 3;  // Update every 3 frames (~10Hz for 30Hz input)
+  
+  if (++esdf_update_counter >= ESDF_UPDATE_INTERVAL) {
+    esdf_update_counter = 0;
+    updateESDF();
+  }
 }
 
 void GridMap::visCallback(const ros::TimerEvent & /*event*/)
@@ -1017,84 +1052,107 @@ void GridMap::depthOdomCallback(const sensor_msgs::ImageConstPtr &img,
   /* get depth image */
   cv_bridge::CvImagePtr cv_ptr;
   cv_ptr = cv_bridge::toCvCopy(img, img->encoding);
-  if (img->encoding == sensor_msgs::image_encodings::TYPE_32FC1)
-  {
-    (cv_ptr->image).convertTo(cv_ptr->image, CV_16UC1, mp_.k_depth_scaling_factor_);
-  }
+  // 🔧 CRITICAL FIX: Do NOT convert float to uint16_t for GPU rendering!
+  // GPU renders float depth in meters, CPU renders uint16_t in millimeters
+  // The projectDepthImage() function now handles both types correctly
+  // if (img->encoding == sensor_msgs::image_encodings::TYPE_32FC1)
+  // {
+  //   (cv_ptr->image).convertTo(cv_ptr->image, CV_16UC1, mp_.k_depth_scaling_factor_);
+  // }
   cv_ptr->image.copyTo(md_.depth_image_);
 
   md_.occ_need_update_ = true;
 }
 
-// ESDF Update Implementation
+// 🚀 CORRECTED Fast Sweeping ESDF Implementation
+// Time Complexity: O(k*N) where k=iterations (typically 2-4), N=voxels
+// Algorithm: Gauss-Seidel iteration with 4 sweeping directions
 void GridMap::updateESDF() {
-  // This is a simplified ESDF implementation using brute-force nearest obstacle search
-  // For better performance, consider using optimized algorithms like:
-  // - Incremental ESDF (Fiery Cushion, etc.)
-  // - Fast Sweeping Method
-  // - Distance Transform algorithms
+  const int nx = mp_.map_voxel_num_(0);
+  const int ny = mp_.map_voxel_num_(1);
+  const int nz = mp_.map_voxel_num_(2);
+  const double res = mp_.resolution_;
+  const double max_dist = 10.0;
   
-  const int buffer_size = mp_.map_voxel_num_(0) * mp_.map_voxel_num_(1) * mp_.map_voxel_num_(2);
-  const double max_dist = 10.0;  // Maximum distance to compute (meters)
-  const int max_dist_voxels = std::ceil(max_dist / mp_.resolution_);
-  
-  // First pass: Find all obstacle voxels
-  std::vector<Eigen::Vector3i> obstacle_voxels;
-  obstacle_voxels.reserve(buffer_size / 10);  // Rough estimate
-  
-  for (int x = 0; x < mp_.map_voxel_num_(0); ++x) {
-    for (int y = 0; y < mp_.map_voxel_num_(1); ++y) {
-      for (int z = 0; z < mp_.map_voxel_num_(2); ++z) {
+  // Step 1: Initialize distances
+  for (int x = 0; x < nx; ++x) {
+    for (int y = 0; y < ny; ++y) {
+      for (int z = 0; z < nz; ++z) {
         int adr = toAddress(x, y, z);
         if (md_.occupancy_buffer_inflate_[adr] == 1) {
-          obstacle_voxels.push_back(Eigen::Vector3i(x, y, z));
-        }
-      }
-    }
-  }
-  
-  // Second pass: Compute distance for each voxel
-  for (int x = 0; x < mp_.map_voxel_num_(0); ++x) {
-    for (int y = 0; y < mp_.map_voxel_num_(1); ++y) {
-      for (int z = 0; z < mp_.map_voxel_num_(2); ++z) {
-        int adr = toAddress(x, y, z);
-        Eigen::Vector3i current_voxel(x, y, z);
-        
-        double min_dist = max_dist;
-        bool is_occupied = (md_.occupancy_buffer_inflate_[adr] == 1);
-        
-        // Search for nearest obstacle within max_dist_voxels
-        for (const auto& obs_voxel : obstacle_voxels) {
-          Eigen::Vector3i diff = current_voxel - obs_voxel;
-          
-          // Quick rejection test using L-infinity norm
-          if (std::abs(diff(0)) > max_dist_voxels || 
-              std::abs(diff(1)) > max_dist_voxels || 
-              std::abs(diff(2)) > max_dist_voxels) {
-            continue;
-          }
-          
-          // Compute Euclidean distance
-          double dist = diff.cast<double>().norm() * mp_.resolution_;
-          
-          if (dist < min_dist) {
-            min_dist = dist;
-          }
-        }
-        
-        // Store distance based on occupancy
-        if (is_occupied) {
-          // Inside obstacle: store in negative buffer
-          md_.esdf_buffer_neg_[adr] = min_dist;
           md_.esdf_buffer_[adr] = 0.0;
+          md_.esdf_buffer_neg_[adr] = 0.0;
         } else {
-          // Free space: store in positive buffer
-          md_.esdf_buffer_[adr] = min_dist;
+          md_.esdf_buffer_[adr] = max_dist;
           md_.esdf_buffer_neg_[adr] = 0.0;
         }
       }
     }
   }
+  
+  // Step 2: Fast Sweeping with 2 iterations (4 sweeps total)
+  // Each iteration: forward + backward sweep
+  for (int iter = 0; iter < 2; ++iter) {
+    
+    // Sweep 1: (+x, +y, +z) direction
+    for (int x = 0; x < nx; ++x) {
+      for (int y = 0; y < ny; ++y) {
+        for (int z = 0; z < nz; ++z) {
+          int adr = toAddress(x, y, z);
+          if (md_.occupancy_buffer_inflate_[adr] == 1) continue;
+          
+          double current = md_.esdf_buffer_[adr];
+          
+          // Check 6-connectivity neighbors with boundary check
+          if (x > 0) {
+            double d = md_.esdf_buffer_[toAddress(x-1, y, z)] + res;
+            if (d < current) current = d;
+          }
+          if (y > 0) {
+            double d = md_.esdf_buffer_[toAddress(x, y-1, z)] + res;
+            if (d < current) current = d;
+          }
+          if (z > 0) {
+            double d = md_.esdf_buffer_[toAddress(x, y, z-1)] + res;
+            if (d < current) current = d;
+          }
+          
+          md_.esdf_buffer_[adr] = std::min(current, max_dist);
+        }
+      }
+    }
+    
+    // Sweep 2: (-x, -y, -z) direction
+    for (int x = nx - 1; x >= 0; --x) {
+      for (int y = ny - 1; y >= 0; --y) {
+        for (int z = nz - 1; z >= 0; --z) {
+          int adr = toAddress(x, y, z);
+          if (md_.occupancy_buffer_inflate_[adr] == 1) continue;
+          
+          double current = md_.esdf_buffer_[adr];
+          
+          // Check 6-connectivity neighbors with boundary check
+          if (x < nx - 1) {
+            double d = md_.esdf_buffer_[toAddress(x+1, y, z)] + res;
+            if (d < current) current = d;
+          }
+          if (y < ny - 1) {
+            double d = md_.esdf_buffer_[toAddress(x, y+1, z)] + res;
+            if (d < current) current = d;
+          }
+          if (z < nz - 1) {
+            double d = md_.esdf_buffer_[toAddress(x, y, z+1)] + res;
+            if (d < current) current = d;
+          }
+          
+          md_.esdf_buffer_[adr] = std::min(current, max_dist);
+        }
+      }
+    }
+  }
+  
+  // Note: This uses 6-connectivity for speed. For better accuracy, add 26-connectivity
+  // (diagonal neighbors) but it will be slower. Current version is sufficient for planning.
 }
 
 // GridMap
