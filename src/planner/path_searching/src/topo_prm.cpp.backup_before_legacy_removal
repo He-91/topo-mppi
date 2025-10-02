@@ -72,15 +72,12 @@ bool TopoPRM::searchTopoPaths(const Vector3d& start, const Vector3d& goal,
                 candidate_paths.emplace_back(raw_paths[i], cost, i);
             }
         } else {
-            // 🔧 SAFETY FALLBACK: Use Legacy when TGK fails
-            // Based on test1 analysis: TGK fails ~30% of time, need backup
-            ROS_WARN("[TopoPRM-TGK] TGK search failed, falling back to Legacy TopoPRM");
+            ROS_WARN("[TopoPRM-TGK] TGK search failed, falling back to legacy method");
             candidate_paths = findTopoPaths(start, goal);  // Fallback to legacy
         }
     } else {
-        // 🔧 COMMENTED OUT: Legacy TopoPRM disabled
-        ROS_WARN("[TopoPRM] Legacy TopoPRM mode disabled (commented out)");
-        // candidate_paths = findTopoPaths(start, goal);  // Legacy method
+        ROS_INFO("[TopoPRM] Using legacy TopoPRM algorithm");
+        candidate_paths = findTopoPaths(start, goal);  // Legacy method
     }
     
     if (candidate_paths.empty()) {
@@ -104,16 +101,6 @@ bool TopoPRM::searchTopoPaths(const Vector3d& start, const Vector3d& goal,
     ROS_INFO("[TopoPRM] Found %zu topological paths", topo_paths.size());
     return true;
 }
-
-// ============================================================================
-// 🔧 LEGACY TOPOLOGICAL PLANNING CODE - COMMENTED OUT FOR TESTING
-// ============================================================================
-// This entire section (findTopoPaths and 4 path generators) is disabled
-// during TGK system validation. Will be permanently removed after testing.
-// Backup: topo_prm.cpp.backup_before_legacy_removal
-// ============================================================================
-
-#if 1  // 🔧 LEGACY CODE RE-ENABLED as safety fallback (based on test1 analysis: TGK fails ~30%)
 
 vector<TopoPath> TopoPRM::findTopoPaths(const Vector3d& start, const Vector3d& goal) {
     vector<TopoPath> paths;
@@ -572,13 +559,5 @@ vector<Vector3d> TopoPRM::generateTangentPoints(const Vector3d& start,
     
     return tangent_points;
 }
-
-#endif  // End of LEGACY CODE BLOCK - Re-enabled as safety fallback
-
-// ============================================================================
-// NOTE: Shared utility functions (isPathValid, calculatePathCost, etc.) 
-// are defined within the #if 1 block above and used by both TGK and Legacy.
-// No need to duplicate them here.
-// ============================================================================
 
 } // namespace ego_planner

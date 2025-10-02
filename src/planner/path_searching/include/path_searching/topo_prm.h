@@ -45,12 +45,16 @@ private:
     int max_sample_num_;
     double collision_check_resolution_;
     
-    // Topological path generation
-    std::vector<TopoPath> findTopoPaths(const Eigen::Vector3d& start, 
-                                       const Eigen::Vector3d& goal);
-    
+    // Shared utility functions (used by both TGK and Legacy)
     bool isPathValid(const std::vector<Eigen::Vector3d>& path);
     bool isLineCollisionFree(const Eigen::Vector3d& start, const Eigen::Vector3d& end);
+    
+    // 🔧 LEGACY FUNCTIONS - RE-ENABLED as safety fallback
+    // Based on test1: TGK fails ~30% of time, need backup mechanism
+#if 1  // Set to 0 to disable Legacy functions
+    // Legacy topological path generation
+    std::vector<TopoPath> findTopoPaths(const Eigen::Vector3d& start, 
+                                       const Eigen::Vector3d& goal);
     
     // Four-directional obstacle avoidance (legacy)
     std::vector<Eigen::Vector3d> generateAlternativePath(const Eigen::Vector3d& start,
@@ -72,6 +76,7 @@ private:
     std::vector<Eigen::Vector3d> generateTangentPoints(const Eigen::Vector3d& start,
                                                       const Eigen::Vector3d& goal,
                                                       const Eigen::Vector3d& obstacle_center);
+#endif  // End LEGACY function declarations
     
     // Cost calculation
     double calculatePathCost(const std::vector<Eigen::Vector3d>& path);

@@ -13,7 +13,7 @@ BiasSampler::BiasSampler()
       sampling_radius_(2.0),
       resolution_(0.1),
       collision_check_res_(0.05),
-      max_corner_num_(20) {
+      max_corner_num_(40) {  // 🔥 FIX: 20→40,增加覆盖密度
 }
 
 BiasSampler::~BiasSampler() {

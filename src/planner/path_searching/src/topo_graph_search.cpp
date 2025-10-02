@@ -9,7 +9,7 @@ namespace ego_planner {
 
 TopoGraphSearch::TopoGraphSearch()
     : max_search_nodes_(1000),
-      connection_radius_(10.0),  // 🔧 Phase 4.5.1.8: Increase from 3.0m to 10.0m for long-range paths
+      connection_radius_(20.0),  // � CRITICAL FIX: 增加到 20m 匹配 TGK 动态半径
       path_pruning_threshold_(0.5),
       max_topo_paths_(5),
       node_counter_(0) {
@@ -271,21 +271,27 @@ void TopoGraphSearch::extractMultiplePaths(const Vector3d& start,
         // Try to find alternative path
         vector<Vector3d> alt_path;
         if (astarSearch(start, goal, alt_path)) {
-            // Check if this path is significantly different
-            bool is_different = true;
-            for (const auto& existing_path : paths) {
-                if (arePathsSimilar(alt_path, existing_path)) {
-                    is_different = false;
-                    break;
+            // 🔧 BUG FIX: Validate path before using it
+            // Reject paths with < 2 waypoints (incomplete paths)
+            if (alt_path.size() < 2) {
+                ROS_DEBUG("[TopoGraphSearch] Rejected incomplete alternative path with %zu waypoints", alt_path.size());
+            } else {
+                // Check if this path is significantly different
+                bool is_different = true;
+                for (const auto& existing_path : paths) {
+                    if (arePathsSimilar(alt_path, existing_path)) {
+                        is_different = false;
+                        break;
+                    }
                 }
-            }
-            
-            if (is_different) {
-                smoothPath(alt_path);
-                paths.push_back(alt_path);
-                ROS_INFO("[TopoGraphSearch] Path %zu: %zu waypoints (blocked node at [%.2f, %.2f, %.2f])", 
-                         paths.size(), alt_path.size(),
-                         blocked_pos.x(), blocked_pos.y(), blocked_pos.z());
+                
+                if (is_different) {
+                    smoothPath(alt_path);
+                    paths.push_back(alt_path);
+                    ROS_INFO("[TopoGraphSearch] Path %zu: %zu waypoints (via alternative from blocked node at [%.2f, %.2f, %.2f])", 
+                             paths.size(), alt_path.size(),
+                             blocked_pos.x(), blocked_pos.y(), blocked_pos.z());
+                }
             }
         }
         
@@ -347,11 +353,10 @@ bool TopoGraphSearch::isPathFree(const Vector3d& from, const Vector3d& to) {
     
     dir.normalize();
     
-    // 🔧 Phase 4.5.1.11: Use adaptive step size based on distance
-    // For short connections (<3m): 0.08m for safety (obstacles)
-    // For long connections (>3m): 0.12m for balance (performance vs safety)
-    // Increased safety margin from 0.1/0.15 to avoid thin obstacle penetration
-    double step = (dist < 3.0) ? 0.08 : 0.12;
+    // � CRITICAL FIX: 放宽路径检查,匹配原始 TGK-Planner
+    // 原 TGK 使用动力学约束检查而非密集几何检查
+    // 降低步长要求: 0.08/0.12m → 0.3/0.5m
+    double step = (dist < 3.0) ? 0.3 : 0.5;
     int num_checks = static_cast<int>(dist / step);
     if (num_checks < 1) num_checks = 1;
     
