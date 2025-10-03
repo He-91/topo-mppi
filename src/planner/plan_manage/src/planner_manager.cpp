@@ -57,6 +57,10 @@ namespace ego_planner
 
     ROS_INFO("[PlannerManager] Initialized topological and MPPI planners");
 
+    /* Initialize TOPO+MPPI visualization publisher */
+    topo_mppi_vis_pub_ = nh.advertise<visualization_msgs::MarkerArray>("/topo_mppi_paths", 10);
+    ROS_INFO("[PlannerManager] Initialized TOPO+MPPI visualization publisher on /topo_mppi_paths");
+
     visualization_ = vis;
   }
 
@@ -244,10 +248,10 @@ namespace ego_planner
 
     t_init = ros::Time::now() - t_start;
 
-    static int vis_id = 0;
-    visualization_->displayInitPathList(point_set, 0.2, 0);
-    // Note: MPPI paths are now handled internally by MPPI planner visualization
-    // No need for separate displayAStarList call
+    // 🎨 Visualization: Clear old A* paths (replaced by TOPO+MPPI visualization)
+    // static int vis_id = 0;
+    // visualization_->displayInitPathList(point_set, 0.2, 0);
+    // Note: MPPI paths are now visualized in STEP 1.5 with matching colors
 
     /*** STEP 1.5: TOPOLOGICAL PLANNING ***/
     // 🎯 Architecture: Topo → MPPI → B-spline
@@ -324,6 +328,9 @@ namespace ego_planner
                         
                         ROS_INFO("[PlannerManager]   Path %zu: MPPI ✅ cost=%.3f, norm_cost=%.3f, length=%.2fm", 
                                  i+1, candidate.mppi_result.cost, candidate.normalized_cost, path_length);
+                        
+                        // 🎨 Visualize this TOPO path + its MPPI result
+                        visualizeTopoMPPIPaths(i, topo_paths[i], candidate.mppi_result, false);
                     } else {
                         ROS_WARN("[PlannerManager]   Path %zu: MPPI ❌ failed", i+1);
                     }
@@ -344,6 +351,10 @@ namespace ego_planner
                 if (best_idx >= 0) {
                     ROS_INFO("[PlannerManager] 🏆 Best MPPI result: Path %d with normalized_cost=%.3f", 
                              best_idx+1, best_norm_cost);
+                    
+                    // 🎨 Highlight the best path
+                    visualizeTopoMPPIPaths(best_idx, mppi_candidates[best_idx].topo_path,
+                                          mppi_candidates[best_idx].mppi_result, true);
                     
                     // Use MPPI-optimized trajectory directly
                     point_set = mppi_candidates[best_idx].mppi_result.positions;
@@ -753,6 +764,100 @@ namespace ego_planner
     }
 
     return success;
+  }
+
+  // 🎨 Visualize TOPO path + its MPPI optimization result with matching colors
+  void EGOPlannerManager::visualizeTopoMPPIPaths(int path_id,
+                                                 const TopoPath& topo_path,
+                                                 const MPPITrajectory& mppi_result,
+                                                 bool is_best) {
+    visualization_msgs::MarkerArray marker_array;
+    
+    // Get unified color for this path
+    PathColor color = TOPO_COLORS[path_id % 10];
+    
+    // Get frame_id from grid_map
+    std::string frame_id = "world";
+    
+    // 1. 🟥 TOPO Original Path (Thick line)
+    visualization_msgs::Marker topo_marker;
+    topo_marker.header.frame_id = frame_id;
+    topo_marker.header.stamp = ros::Time::now();
+    topo_marker.ns = "topo_path";
+    topo_marker.id = path_id * 1000;  // Unique ID per path
+    topo_marker.type = visualization_msgs::Marker::LINE_STRIP;
+    topo_marker.action = visualization_msgs::Marker::ADD;
+    topo_marker.pose.orientation.w = 1.0;
+    
+    // Thick line for TOPO path
+    topo_marker.scale.x = 0.15;
+    topo_marker.color.r = color.r;
+    topo_marker.color.g = color.g;
+    topo_marker.color.b = color.b;
+    topo_marker.color.a = 0.9;
+    
+    for (const auto& pt : topo_path.path) {
+      geometry_msgs::Point p;
+      p.x = pt.x(); p.y = pt.y(); p.z = pt.z();
+      topo_marker.points.push_back(p);
+    }
+    marker_array.markers.push_back(topo_marker);
+    
+    // 2. 🔷 MPPI Optimized Path (Thin line, same color)
+    visualization_msgs::Marker mppi_marker;
+    mppi_marker.header = topo_marker.header;
+    mppi_marker.ns = "mppi_path";
+    mppi_marker.id = path_id * 1000 + 1;
+    mppi_marker.type = visualization_msgs::Marker::LINE_STRIP;
+    mppi_marker.action = visualization_msgs::Marker::ADD;
+    mppi_marker.pose.orientation.w = 1.0;
+    
+    // Thin line for MPPI (or thick if best)
+    mppi_marker.scale.x = is_best ? 0.20 : 0.08;
+    mppi_marker.color.r = color.r;
+    mppi_marker.color.g = color.g;
+    mppi_marker.color.b = color.b;
+    mppi_marker.color.a = is_best ? 1.0 : 0.6;  // Opaque if best
+    
+    for (const auto& pt : mppi_result.positions) {
+      geometry_msgs::Point p;
+      p.x = pt.x(); p.y = pt.y(); p.z = pt.z();
+      mppi_marker.points.push_back(p);
+    }
+    marker_array.markers.push_back(mppi_marker);
+    
+    // 3. 🏆 Best Path Label (if this is the best one)
+    if (is_best && !mppi_result.positions.empty()) {
+      visualization_msgs::Marker label_marker;
+      label_marker.header = topo_marker.header;
+      label_marker.ns = "best_label";
+      label_marker.id = 9999;
+      label_marker.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
+      label_marker.action = visualization_msgs::Marker::ADD;
+      
+      // Position above the start of the path
+      label_marker.pose.position.x = mppi_result.positions[0].x();
+      label_marker.pose.position.y = mppi_result.positions[0].y();
+      label_marker.pose.position.z = mppi_result.positions[0].z() + 0.8;
+      label_marker.pose.orientation.w = 1.0;
+      
+      label_marker.scale.z = 0.4;  // Text height
+      label_marker.color.r = 1.0;
+      label_marker.color.g = 1.0;
+      label_marker.color.b = 0.0;
+      label_marker.color.a = 1.0;
+      label_marker.text = "🏆 BEST PATH #" + std::to_string(path_id);
+      
+      marker_array.markers.push_back(label_marker);
+      
+      ROS_INFO("[PlannerManager] 🎨 Visualized BEST path #%d: %zu TOPO waypoints, %zu MPPI points", 
+               path_id, topo_path.path.size(), mppi_result.positions.size());
+    } else {
+      ROS_DEBUG("[PlannerManager] 🎨 Visualized path #%d: %zu TOPO waypoints, %zu MPPI points", 
+                path_id, topo_path.path.size(), mppi_result.positions.size());
+    }
+    
+    topo_mppi_vis_pub_.publish(marker_array);
   }
 
   // !SECTION

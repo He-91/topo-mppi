@@ -12,9 +12,28 @@
 #include <traj_utils/planning_visualization.h>
 #include <path_searching/topo_prm.h>
 #include <path_searching/mppi_planner.h>
+#include <visualization_msgs/MarkerArray.h>
 
 namespace ego_planner
 {
+
+  // 🎨 Unified color scheme for TOPO paths and their corresponding MPPI trajectories
+  struct PathColor {
+    double r, g, b;
+  };
+
+  const PathColor TOPO_COLORS[10] = {
+    {1.0, 0.0, 0.0},  // #0: Red
+    {0.0, 1.0, 0.0},  // #1: Green  
+    {0.0, 0.0, 1.0},  // #2: Blue
+    {1.0, 0.5, 0.0},  // #3: Orange
+    {1.0, 0.0, 1.0},  // #4: Magenta
+    {0.0, 1.0, 1.0},  // #5: Cyan
+    {0.5, 0.0, 0.5},  // #6: Purple
+    {1.0, 1.0, 0.0},  // #7: Yellow
+    {0.0, 0.5, 0.5},  // #8: Dark Cyan
+    {0.5, 0.5, 0.5},  // #9: Gray
+  };
 
   // Fast Planner Manager
   // Key algorithms of mapping and planning are called
@@ -62,6 +81,13 @@ namespace ego_planner
     /* New topological and MPPI planning modules */
     TopoPRM::Ptr topo_planner_;
     MPPIPlanner::Ptr mppi_planner_;
+
+    /* Visualization for TOPO+MPPI combined paths */
+    ros::Publisher topo_mppi_vis_pub_;
+    void visualizeTopoMPPIPaths(int path_id,
+                               const TopoPath& topo_path,
+                               const MPPITrajectory& mppi_result,
+                               bool is_best);
 
     int continous_failures_count_{0};
 

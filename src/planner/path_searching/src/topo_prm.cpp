@@ -9,10 +9,7 @@ namespace ego_planner {
 
 TopoPRM::TopoPRM() 
     : step_size_(0.2), search_radius_(5.0), max_sample_num_(1000), 
-      collision_check_resolution_(0.05), use_tgk_algorithm_(true) {
-    // 🚀 Phase 4: Initialize TGK components
-    bias_sampler_.reset(new BiasSampler());
-    topo_graph_search_.reset(new TopoGraphSearch());
+      collision_check_resolution_(0.05) {
 }
 
 TopoPRM::~TopoPRM() {
@@ -25,26 +22,10 @@ void TopoPRM::init(ros::NodeHandle& nh, GridMap::Ptr grid_map) {
     // Get frame_id from node parameter, default to "world" if not set
     nh.param("grid_map/frame_id", frame_id_, std::string("world"));
     
-    // 🚀 Phase 4: Get TGK enable flag from parameter
-    nh.param("topo_prm/use_tgk_algorithm", use_tgk_algorithm_, true);
-    
-    // 🚀 Phase 4.5: Get maximum topological paths parameter
-    int max_topo_paths = 5;  // Default: 5 paths
-    nh.param("topo_prm/max_topo_paths", max_topo_paths, 5);
-    
-    if (max_topo_paths < 1) max_topo_paths = 1;
-    if (max_topo_paths > 10) max_topo_paths = 10;  // Limit to 10 for performance
-    
-    // 🚀 Phase 4: Initialize TGK components
-    bias_sampler_->init(nh, grid_map);
-    topo_graph_search_->init(grid_map, bias_sampler_);
-    topo_graph_search_->setMaxTopoPaths(max_topo_paths);  // 🚀 Set max paths
-    
     ROS_INFO("[TopoPRM] Initialized publisher on topic '/topo_paths'");
     ROS_INFO("[TopoPRM] Initialized with step_size: %f, search_radius: %f, frame_id: %s", 
              step_size_, search_radius_, frame_id_.c_str());
-    ROS_INFO("[TopoPRM] 🚀 TGK algorithm: %s", use_tgk_algorithm_ ? "ENABLED" : "DISABLED");
-    ROS_INFO("[TopoPRM] 🚀 Maximum topological paths: %d", max_topo_paths);
+    ROS_INFO("[TopoPRM] Using Legacy 4-direction TopoPRM (TGK removed)");
 }
 
 bool TopoPRM::searchTopoPaths(const Vector3d& start, const Vector3d& goal,
@@ -54,34 +35,9 @@ bool TopoPRM::searchTopoPaths(const Vector3d& start, const Vector3d& goal,
     ROS_INFO("[TopoPRM] Searching topological paths from [%.2f, %.2f, %.2f] to [%.2f, %.2f, %.2f]", 
              start.x(), start.y(), start.z(), goal.x(), goal.y(), goal.z());
     
-    // 🚀 Phase 4: Use TGK algorithm if enabled
-    vector<TopoPath> candidate_paths;
-    if (use_tgk_algorithm_) {
-        ROS_INFO("[TopoPRM] 🚀 Using TGK algorithm for topological planning");
-        
-        // Use TGK graph search
-        vector<vector<Vector3d>> raw_paths;
-        bool tgk_success = topo_graph_search_->searchTopoPaths(start, goal, raw_paths);
-        
-        if (tgk_success && !raw_paths.empty()) {
-            ROS_INFO("[TopoPRM-TGK] Found %zu topological paths", raw_paths.size());
-            
-            // Convert to TopoPath format and calculate costs
-            for (size_t i = 0; i < raw_paths.size(); ++i) {
-                double cost = calculatePathCost(raw_paths[i]);
-                candidate_paths.emplace_back(raw_paths[i], cost, i);
-            }
-        } else {
-            // 🔧 SAFETY FALLBACK: Use Legacy when TGK fails
-            // Based on test1 analysis: TGK fails ~30% of time, need backup
-            ROS_WARN("[TopoPRM-TGK] TGK search failed, falling back to Legacy TopoPRM");
-            candidate_paths = findTopoPaths(start, goal);  // Fallback to legacy
-        }
-    } else {
-        // 🔧 COMMENTED OUT: Legacy TopoPRM disabled
-        ROS_WARN("[TopoPRM] Legacy TopoPRM mode disabled (commented out)");
-        // candidate_paths = findTopoPaths(start, goal);  // Legacy method
-    }
+    // Use Legacy 4-direction TopoPRM (stable, tested, working)
+    ROS_INFO("[TopoPRM] Using Legacy 4-direction TopoPRM");
+    vector<TopoPath> candidate_paths = findTopoPaths(start, goal);
     
     if (candidate_paths.empty()) {
         ROS_WARN("[TopoPRM] No valid topological paths found");
@@ -253,7 +209,6 @@ vector<Vector3d> TopoPRM::generateAlternativePath(const Vector3d& start,
     
     // Calculate avoidance direction
     Vector3d avoidance_dir;
-    Vector3d to_obstacle = obstacle_center - start;
     Vector3d forward_dir = (goal - start).normalized();
     
     switch (direction) {
@@ -471,7 +426,6 @@ vector<Vector3d> TopoPRM::generateCircularPath(const Vector3d& start,
     
     // Get the direction from start to goal
     Vector3d start_to_goal = goal - start;
-    Vector3d start_to_obs = obstacle_center - start;
     
     // Find perpendicular direction in horizontal plane
     Vector3d horizontal_perp = start_to_goal.cross(Vector3d(0, 0, 1)).normalized();
@@ -539,9 +493,8 @@ vector<Vector3d> TopoPRM::generateTangentPoints(const Vector3d& start,
                                                const Vector3d& obstacle_center) {
     vector<Vector3d> tangent_points;
     
-    // Get the direction from obstacle to start and goal
+    // Get the direction from obstacle to start
     Vector3d obs_to_start = (start - obstacle_center).normalized();
-    Vector3d obs_to_goal = (goal - obstacle_center).normalized();
     
     // Calculate tangent points around the obstacle
     double obstacle_radius = search_radius_ * 0.8;

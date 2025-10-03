@@ -37,8 +37,6 @@ include_directories(
 add_library( path_searching 
     src/mppi_planner.cpp
     src/topo_prm.cpp
-    src/bias_sampler.cpp
-    src/topo_graph_search.cpp
     )
 target_link_libraries( path_searching
     ${catkin_LIBRARIES}

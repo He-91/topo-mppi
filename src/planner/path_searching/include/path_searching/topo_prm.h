@@ -12,10 +12,6 @@
 #include <visualization_msgs/Marker.h>
 #include <visualization_msgs/MarkerArray.h>
 
-// 🚀 Phase 4: TGK-Planner integration
-#include "path_searching/bias_sampler.h"
-#include "path_searching/topo_graph_search.h"
-
 namespace ego_planner {
 
 struct TopoPath {
@@ -34,25 +30,17 @@ private:
     ros::Publisher topo_paths_pub_;
     std::string frame_id_;
     
-    // 🚀 Phase 4: TGK algorithm components
-    BiasSampler::Ptr bias_sampler_;
-    TopoGraphSearch::Ptr topo_graph_search_;
-    bool use_tgk_algorithm_;  // Flag to enable/disable TGK
-    
-    // Parameters (kept for backward compatibility)
+    // Parameters
     double step_size_;
     double search_radius_;
     int max_sample_num_;
     double collision_check_resolution_;
     
-    // Shared utility functions (used by both TGK and Legacy)
+    // Shared utility functions
     bool isPathValid(const std::vector<Eigen::Vector3d>& path);
     bool isLineCollisionFree(const Eigen::Vector3d& start, const Eigen::Vector3d& end);
     
-    // 🔧 LEGACY FUNCTIONS - RE-ENABLED as safety fallback
-    // Based on test1: TGK fails ~30% of time, need backup mechanism
-#if 1  // Set to 0 to disable Legacy functions
-    // Legacy topological path generation
+    // Legacy 4-direction topological path generation
     std::vector<TopoPath> findTopoPaths(const Eigen::Vector3d& start, 
                                        const Eigen::Vector3d& goal);
     
@@ -76,7 +64,6 @@ private:
     std::vector<Eigen::Vector3d> generateTangentPoints(const Eigen::Vector3d& start,
                                                       const Eigen::Vector3d& goal,
                                                       const Eigen::Vector3d& obstacle_center);
-#endif  // End LEGACY function declarations
     
     // Cost calculation
     double calculatePathCost(const std::vector<Eigen::Vector3d>& path);
