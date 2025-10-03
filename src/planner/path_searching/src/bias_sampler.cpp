@@ -13,7 +13,7 @@ BiasSampler::BiasSampler()
       sampling_radius_(2.0),
       resolution_(0.1),
       collision_check_res_(0.05),
-      max_corner_num_(40) {  // 🔥 FIX: 20→40,增加覆盖密度
+      max_corner_num_(60) {  // � ENHANCED: 40→60,增加覆盖密度,减少丢失关键点
 }
 
 BiasSampler::~BiasSampler() {
@@ -26,12 +26,13 @@ void BiasSampler::init(ros::NodeHandle& nh, GridMap::Ptr grid_map) {
     nh.param("bias_sampler/corner_detection_radius", corner_detection_radius_, 3.0);
     nh.param("bias_sampler/sampling_radius", sampling_radius_, 2.0);
     nh.param("bias_sampler/resolution", resolution_, 0.1);
-    nh.param("bias_sampler/max_corner_num", max_corner_num_, 20);
+    nh.param("bias_sampler/max_corner_num", max_corner_num_, 60);  // 默认60
     
     ROS_INFO("[BiasSampler] Initialized with:");
     ROS_INFO("  - Corner detection radius: %.2f", corner_detection_radius_);
     ROS_INFO("  - Sampling radius: %.2f", sampling_radius_);
     ROS_INFO("  - Resolution: %.2f", resolution_);
+    ROS_INFO("  - Max corner number: %d", max_corner_num_);
 }
 
 bool BiasSampler::findSamplingSpaces(const Vector3d& start,

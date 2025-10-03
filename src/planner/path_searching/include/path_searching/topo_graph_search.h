@@ -21,8 +21,9 @@ struct TopoNode {
     int parent_id;          // Parent node ID
     int node_id;            // Unique node ID
     int topo_class;         // Topological class
+    bool is_blocked;        // 🚀 NEW: 标记节点是否被阻塞 (用于K-shortest paths)
     
-    TopoNode() : g_cost(0), h_cost(0), parent_id(-1), node_id(-1), topo_class(-1) {}
+    TopoNode() : g_cost(0), h_cost(0), parent_id(-1), node_id(-1), topo_class(-1), is_blocked(false) {}
     
     double f_cost() const { return g_cost + h_cost; }
 };
@@ -142,6 +143,13 @@ private:
      */
     bool arePathsSimilar(const std::vector<Eigen::Vector3d>& path1,
                         const std::vector<Eigen::Vector3d>& path2);
+    
+    /**
+     * @brief Calculate path similarity score (0.0 = different, 1.0 = identical)
+     * 🚀 NEW: For improved K-shortest paths algorithm
+     */
+    double calculatePathSimilarity(const std::vector<Eigen::Vector3d>& path1,
+                                   const std::vector<Eigen::Vector3d>& path2);
 };
 
 } // namespace ego_planner
