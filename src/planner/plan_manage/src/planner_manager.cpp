@@ -368,13 +368,18 @@ namespace ego_planner
                 
                 // Ensure sufficient points for B-spline generation
                 if (point_set.size() < 7) {
-                    // Interpolate additional points along the path
+                    // 🚀 OPTIMIZED: 稀疏插值，保持Topo路径的引导特性
+                    // 旧策略: num = segment_len / (0.4 * 0.5) → 5米段插25个点 → waypoints=55-133
+                    // 新策略: num = segment_len / (0.4 * 4.0) → 5米段插3个点 → waypoints=10以内
+                    // 目标: Topo路径保持稀疏(3-10个转折点)，MPPI优化局部细节
                     std::vector<Eigen::Vector3d> dense_path;
                     for (size_t i = 0; i < point_set.size() - 1; ++i) {
                         dense_path.push_back(point_set[i]);
                         Eigen::Vector3d segment_vec = point_set[i+1] - point_set[i];
                         double segment_len = segment_vec.norm();
-                        int num_intermediate = std::max(1, (int)(segment_len / (pp_.ctrl_pt_dist * 0.5)));
+                        
+                        // 优化: 4倍稀疏 (0.5 → 4.0)
+                        int num_intermediate = std::max(0, (int)(segment_len / (pp_.ctrl_pt_dist * 4.0)));
                         
                         for (int j = 1; j < num_intermediate; ++j) {
                             double t = (double)j / num_intermediate;
@@ -383,6 +388,9 @@ namespace ego_planner
                     }
                     dense_path.push_back(point_set.back());
                     point_set = dense_path;
+                    
+                    ROS_INFO("[PlannerManager] 🎯 Sparse interpolation: %zu → %zu waypoints", 
+                             best_path.path.size(), point_set.size());
                 }
                 
                 // Re-parameterize control points using topological path

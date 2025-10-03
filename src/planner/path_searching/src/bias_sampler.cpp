@@ -69,24 +69,86 @@ vector<Vector3d> BiasSampler::detectObstacleCorners(const Vector3d& start,
     Vector3d dir = (goal - start).normalized();
     double dist = (goal - start).norm();
     
-    // Search in a cylinder around the direct path
-    double search_radius = corner_detection_radius_;
-    int num_samples = static_cast<int>(dist / resolution_);
+    // 🚀 MULTI-CORRIDOR SAMPLING: 在多个平行走廊中搜索corner
+    // 目标: 生成拓扑多样化的节点,支持K-shortest paths
+    // 策略: 在主走廊±侧向偏移的多个走廊中搜索
     
-    // Sample points along the path and around it
-    for (int i = 0; i < num_samples; ++i) {
-        double t = static_cast<double>(i) / num_samples;
-        Vector3d center_pt = start + t * dist * dir;
+    // 定义搜索走廊: 主走廊 + 左右侧向偏移走廊
+    vector<double> corridor_offsets = {
+        0.0,      // 主走廊 (原始直线)
+        -5.0,     // 左侧5m
+        -10.0,    // 左侧10m
+        5.0,      // 右侧5m
+        10.0      // 右侧10m
+    };
+    
+    // 每个走廊的搜索半径 (主走廊大,侧走廊小)
+    double main_search_radius = corner_detection_radius_;      // 主走廊: 3m
+    double side_search_radius = corner_detection_radius_ * 0.67;  // 侧走廊: 2m
+    
+    // 每个走廊的节点配额 (确保多样性)
+    int corners_per_corridor = max_corner_num_ / corridor_offsets.size();  // 60/5 = 12
+    
+    // 计算侧向偏移的参考方向 (垂直于起点-终点连线)
+    Vector3d lateral_dir = Vector3d(-dir.y(), dir.x(), 0.0).normalized();  // 2D平面垂直方向
+    
+    for (double offset : corridor_offsets) {
+        int corridor_corners = 0;
+        double search_radius = (offset == 0.0) ? main_search_radius : side_search_radius;
         
-        // Sample radially around this center point
-        for (double theta = 0; theta < 2 * M_PI; theta += M_PI / 4) {
-            for (double r = resolution_; r < search_radius; r += resolution_) {
-                Vector3d offset = r * Vector3d(cos(theta), sin(theta), 0.0);
-                Vector3d sample_pt = center_pt + offset;
+        // 该走廊的中心线
+        Vector3d corridor_start = start + offset * lateral_dir;
+        Vector3d corridor_goal = goal + offset * lateral_dir;
+        
+        int num_samples = static_cast<int>(dist / resolution_);
+        
+        // Sample points along this corridor
+        for (int i = 0; i < num_samples; ++i) {
+            double t = static_cast<double>(i) / num_samples;
+            Vector3d center_pt = corridor_start + t * dist * dir;
+            
+            // Sample radially around this center point
+            for (double theta = 0; theta < 2 * M_PI; theta += M_PI / 4) {
+                for (double r = resolution_; r < search_radius; r += resolution_) {
+                    Vector3d offset_vec = r * Vector3d(cos(theta), sin(theta), 0.0);
+                    Vector3d sample_pt = center_pt + offset_vec;
+                    
+                    // Check if this point is a corner
+                    if (isCornerPoint(sample_pt)) {
+                        // Avoid duplicates
+                        bool is_duplicate = false;
+                        for (const auto& corner : corners) {
+                            if ((sample_pt - corner).norm() < resolution_ * 2.0) {
+                                is_duplicate = true;
+                                break;
+                            }
+                        }
+                        
+                        if (!is_duplicate) {
+                            corners.push_back(sample_pt);
+                            corridor_corners++;
+                            
+                            // 达到该走廊配额,跳到下一个走廊
+                            if (corridor_corners >= corners_per_corridor) {
+                                goto next_corridor;
+                            }
+                            
+                            // 全局上限
+                            if (corners.size() >= static_cast<size_t>(max_corner_num_)) {
+                                ROS_INFO("[BiasSampler] ✅ Multi-corridor sampling: collected %zu corners from %zu corridors", 
+                                         corners.size(), corridor_offsets.size());
+                                return corners;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Also check in vertical direction
+            for (double z = -search_radius; z <= search_radius; z += resolution_) {
+                Vector3d sample_pt = center_pt + Vector3d(0, 0, z);
                 
-                // Check if this point is a corner
                 if (isCornerPoint(sample_pt)) {
-                    // Avoid duplicates
                     bool is_duplicate = false;
                     for (const auto& corner : corners) {
                         if ((sample_pt - corner).norm() < resolution_ * 2.0) {
@@ -97,9 +159,14 @@ vector<Vector3d> BiasSampler::detectObstacleCorners(const Vector3d& start,
                     
                     if (!is_duplicate) {
                         corners.push_back(sample_pt);
+                        corridor_corners++;
+                        
+                        if (corridor_corners >= corners_per_corridor) {
+                            goto next_corridor;
+                        }
                         
                         if (corners.size() >= static_cast<size_t>(max_corner_num_)) {
-                            ROS_WARN("[BiasSampler] Reached max corner number limit");
+                            ROS_INFO("[BiasSampler] ✅ Multi-corridor sampling: collected %zu corners", corners.size());
                             return corners;
                         }
                     }
@@ -107,30 +174,12 @@ vector<Vector3d> BiasSampler::detectObstacleCorners(const Vector3d& start,
             }
         }
         
-        // Also check in vertical direction
-        for (double z = -search_radius; z <= search_radius; z += resolution_) {
-            Vector3d sample_pt = center_pt + Vector3d(0, 0, z);
-            
-            if (isCornerPoint(sample_pt)) {
-                bool is_duplicate = false;
-                for (const auto& corner : corners) {
-                    if ((sample_pt - corner).norm() < resolution_ * 2.0) {
-                        is_duplicate = true;
-                        break;
-                    }
-                }
-                
-                if (!is_duplicate) {
-                    corners.push_back(sample_pt);
-                    
-                    if (corners.size() >= static_cast<size_t>(max_corner_num_)) {
-                        return corners;
-                    }
-                }
-            }
-        }
+        next_corridor:
+        ROS_INFO("[BiasSampler] Corridor offset=%.1fm: collected %d corners", offset, corridor_corners);
     }
     
+    ROS_INFO("[BiasSampler] ✅ Multi-corridor sampling complete: %zu total corners from %zu corridors", 
+             corners.size(), corridor_offsets.size());
     return corners;
 }
 

@@ -22,8 +22,9 @@ struct TopoNode {
     int node_id;            // Unique node ID
     int topo_class;         // Topological class
     bool is_blocked;        // 🚀 NEW: 标记节点是否被阻塞 (用于K-shortest paths)
+    int corridor_id;        // 🚀 NEW: 走廊ID (-10, -5, 0, +5, +10) - 用于拓扑感知的K-shortest
     
-    TopoNode() : g_cost(0), h_cost(0), parent_id(-1), node_id(-1), topo_class(-1), is_blocked(false) {}
+    TopoNode() : g_cost(0), h_cost(0), parent_id(-1), node_id(-1), topo_class(-1), is_blocked(false), corridor_id(0) {}
     
     double f_cost() const { return g_cost + h_cost; }
 };
@@ -150,6 +151,20 @@ private:
      */
     double calculatePathSimilarity(const std::vector<Eigen::Vector3d>& path1,
                                    const std::vector<Eigen::Vector3d>& path2);
+    
+    /**
+     * @brief Check if two paths have different corridor sequences
+     * 🚀 NEW: Topological diversity check based on corridor sequences
+     * @return true if corridors are different (topologically distinct paths)
+     */
+    bool isCorridorSequenceDifferent(const std::vector<int>& corridors1,
+                                     const std::vector<int>& corridors2);
+    
+    /**
+     * @brief Extract corridor sequence from a path
+     * 🚀 NEW: Returns deduplicated corridor ID sequence, e.g., [0] or [-5, 0] or [+5, +10]
+     */
+    std::vector<int> extractCorridorSequence(const std::vector<Eigen::Vector3d>& path);
 };
 
 } // namespace ego_planner

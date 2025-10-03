@@ -1,6 +1,7 @@
 #include "path_searching/topo_graph_search.h"
 #include <algorithm>
 #include <cmath>
+#include <map>
 
 using namespace std;
 using namespace Eigen;
@@ -188,6 +189,50 @@ bool TopoGraphSearch::buildSearchGraph(const Vector3d& start, const Vector3d& go
         }
     }
     
+    // 🚀 CORRIDOR ID LABELING: 为每个节点标记所属走廊
+    // 目标: 实现拓扑感知的K-shortest paths
+    // 策略: 根据节点相对起点-终点连线的侧向偏移量分类
+    
+    if (node_pool_.size() >= 2) {
+        Vector3d sg_dir = (goal - start).normalized();
+        Vector3d lateral_dir = Vector3d(-sg_dir.y(), sg_dir.x(), 0.0).normalized();  // 垂直方向
+        Vector3d midpoint = (start + goal) / 2.0;
+        
+        // 🔧 FIX 1: 修复走廊分类 - 不强制起点/终点,使用实际侧向偏移量
+        for (size_t i = 0; i < node_pool_.size(); ++i) {
+            Vector3d to_node = node_pool_[i].pos - midpoint;
+            double lateral_offset = to_node.dot(lateral_dir);
+            
+            // 🔧 FIX 2: 根据侧向偏移量分配走廊ID (对齐BiasedSampler的±0/±5/±10m)
+            // 分类边界: -7.5, -2.5, +2.5, +7.5 (走廊中心±2.5m)
+            if (lateral_offset < -7.5) {
+                node_pool_[i].corridor_id = -10;
+            } else if (lateral_offset < -2.5) {
+                node_pool_[i].corridor_id = -5;
+            } else if (lateral_offset < 2.5) {
+                node_pool_[i].corridor_id = 0;  // 主走廊
+            } else if (lateral_offset < 7.5) {
+                node_pool_[i].corridor_id = 5;
+            } else {
+                node_pool_[i].corridor_id = 10;
+            }
+            
+            ROS_DEBUG("[TopoGraphSearch] Node %zu: corridor_id=%d, lateral_offset=%.2f",
+                     i, node_pool_[i].corridor_id, lateral_offset);
+        }
+        
+        // 统计每个走廊的节点数
+        map<int, int> corridor_counts;
+        for (const auto& node : node_pool_) {
+            corridor_counts[node.corridor_id]++;
+        }
+        
+        ROS_INFO("[TopoGraphSearch] 🗺️ Corridor distribution (all nodes):");
+        for (const auto& pair : corridor_counts) {
+            ROS_INFO("  Corridor %+3d: %2d nodes", pair.first, pair.second);
+        }
+    }
+    
     ROS_INFO("[TopoGraphSearch] Graph built with %zu nodes", node_pool_.size());
     return node_pool_.size() >= 2;
 }
@@ -248,13 +293,29 @@ bool TopoGraphSearch::astarSearch(const Vector3d& start,
             // Reconstruct path
             path.clear();
             int id = goal_id;
+            vector<int> path_node_ids_temp;  // 临时记录路径节点ID
             while (id != -1) {
                 path.push_back(node_states[id].pos);
+                path_node_ids_temp.push_back(id);
                 id = node_states[id].parent_id;
             }
             reverse(path.begin(), path.end());
+            reverse(path_node_ids_temp.begin(), path_node_ids_temp.end());
             
-            ROS_INFO("[TopoGraphSearch] A* found path in %d iterations", iter);
+            // 🔧 FIX 9: 验证路径是否经过被阻塞的节点(调试用)
+            bool path_uses_blocked = false;
+            for (int node_id : path_node_ids_temp) {
+                if (node_pool_[node_id].is_blocked) {
+                    path_uses_blocked = true;
+                    ROS_ERROR("[TopoGraphSearch] ❌ BUG: Path uses blocked node %d (corridor %+d)!",
+                              node_id, node_pool_[node_id].corridor_id);
+                }
+            }
+            
+            if (!path_uses_blocked) {
+                ROS_INFO("[TopoGraphSearch] ✅ A* found valid path in %d iterations (no blocked nodes used)", iter);
+            }
+            
             return true;
         }
         
@@ -265,7 +326,11 @@ bool TopoGraphSearch::astarSearch(const Vector3d& start,
             
             // 🔧 CRITICAL FIX: 跳过被阻塞的节点 (K-shortest paths)
             // 这样阻塞节点后,A*会自动寻找绕过的路径
-            if (node_pool_[i].is_blocked) continue;
+            if (node_pool_[i].is_blocked) {
+                ROS_DEBUG("[TopoGraphSearch] Skipping blocked node %zu (corridor %+d)", 
+                         i, node_pool_[i].corridor_id);
+                continue;
+            }
             
             // Check if can connect
             connections_tested++;
@@ -317,106 +382,289 @@ void TopoGraphSearch::extractMultiplePaths(const Vector3d& start,
     paths.push_back(first_path);
     ROS_INFO("[TopoGraphSearch] Path 1: %zu waypoints", first_path.size());
     
-    // 🚀 ENHANCED K-SHORTEST PATHS: 改进多路径生成
-    // 目标: 多路径生成率 13% → 40%
-    // 策略: 阻塞走廊 + 放宽相似度 + 多点阻塞
-    // 🔧 FIX: 使用is_blocked标记,避免删除节点导致索引错乱 → bad_alloc崩溃
+    // 🚀 CORRIDOR-AWARE K-SHORTEST PATHS: 拓扑感知的多路径生成
+    // 目标: 多路径生成率 0% → 60%
+    // 策略: 识别path1的走廊 → 阻塞整个走廊 → 强制使用其他走廊
     int max_paths = max_topo_paths_;  // Target: 3-5 paths (configurable)
     
-    for (int attempt = 1; attempt < max_paths && first_path.size() >= 3; attempt++) {
-        // 🔧 改进1: 阻塞多个位置 (走廊阻塞)
-        // 不只阻塞1个点,而是阻塞第1条路径的多个关键节点
-        vector<int> blocked_node_ids;
-        
-        // 选择5个阻塞位置: 0.15, 0.35, 0.5, 0.65, 0.85 (增强覆盖)
-        vector<double> block_ratios = {0.15, 0.35, 0.5, 0.65, 0.85};
-        
-        for (double ratio : block_ratios) {
-            size_t block_idx = static_cast<size_t>(first_path.size() * ratio);
-            if (block_idx >= first_path.size()) continue;
-            
-            Vector3d blocked_pos = first_path[block_idx];
-            
-            // 找最近的关键点
-            int blocked_node_id = -1;
-            double min_dist = std::numeric_limits<double>::max();
-            for (size_t i = 1; i < node_pool_.size() - 1; i++) {  // Skip start(0), goal(last)
-                // 避免重复阻塞
-                bool already_blocked = false;
-                for (int id : blocked_node_ids) {
-                    if (static_cast<size_t>(id) == i) {
-                        already_blocked = true;
-                        break;
-                    }
-                }
-                if (already_blocked) continue;
-                
-                double dist = (node_pool_[i].pos - blocked_pos).norm();
-                if (dist < min_dist) {
-                    min_dist = dist;
-                    blocked_node_id = i;
-                }
-            }
-            
-            // 🔧 改进2: 阻塞半径从3m扩大到8m (覆盖更大走廊)
-            if (blocked_node_id >= 0 && min_dist <= 8.0) {
-                blocked_node_ids.push_back(blocked_node_id);
+    // Step 1: 识别第1条路径的主走廊
+    map<int, int> corridor_usage;  // 统计path1使用的走廊
+    for (const auto& waypoint : first_path) {
+        // 找距离最近的节点,获取其走廊ID
+        int nearest_node_id = -1;
+        double min_dist = std::numeric_limits<double>::max();
+        for (size_t i = 0; i < node_pool_.size(); i++) {
+            double dist = (node_pool_[i].pos - waypoint).norm();
+            if (dist < min_dist) {
+                min_dist = dist;
+                nearest_node_id = i;
             }
         }
         
-        if (blocked_node_ids.empty()) {
-            ROS_INFO("[TopoGraphSearch] ⚠️ Attempt %d: No nodes to block (path too short or no matching nodes)", attempt);
-            continue;
+        if (nearest_node_id >= 0) {
+            corridor_usage[node_pool_[nearest_node_id].corridor_id]++;
+        }
+    }
+    
+    // 🔧 FIX 1: 修复主走廊识别 - 排除起点/终点的影响
+    // 问题: 起点/终点都在走廊0,导致所有路径都被识别为走廊0
+    // 解决: 只统计中间waypoint(排除first和last)
+    int start_corridor = node_pool_[0].corridor_id;
+    int goal_corridor = node_pool_[node_pool_.size() - 1].corridor_id;
+    
+    // 如果起点/终点在同一走廊,减去它们的贡献
+    if (start_corridor == goal_corridor && corridor_usage[start_corridor] >= 2) {
+        corridor_usage[start_corridor] -= 2;  // 减去起点和终点
+    }
+    
+    // 找使用最多的走廊
+    int main_corridor = 0;
+    int max_usage = 0;
+    for (const auto& pair : corridor_usage) {
+        if (pair.second > max_usage) {
+            max_usage = pair.second;
+            main_corridor = pair.first;
+        }
+    }
+    
+    ROS_INFO("[TopoGraphSearch] 🎯 Path 1 main corridor: %+d (used %d times, start/goal in corridor %+d)", 
+             main_corridor, max_usage, start_corridor);
+    
+    // Step 2: 渐进式阻塞走廊
+    vector<int> forbidden_corridors;
+    forbidden_corridors.push_back(main_corridor);  // 第1次阻塞主走廊
+    
+    // 🔧 FIX 3: 记录每条路径使用的节点,便于调试
+    vector<vector<int>> path_node_ids;  // 每条路径使用的节点ID列表
+    
+    // 🔧 FIX 4: 永远不阻塞起点和终点
+    int start_id = 0;
+    int goal_id = node_pool_.size() - 1;
+    
+    for (int attempt = 1; attempt < max_paths; attempt++) {
+        // 🔧 FIX 5: 累积阻塞 - 阻塞所有forbidden走廊的节点
+        vector<int> newly_blocked;
+        
+        for (size_t i = 0; i < node_pool_.size(); i++) {
+            // 🚀 CRITICAL: 永远不阻塞起点和终点!
+            if (i == static_cast<size_t>(start_id) || i == static_cast<size_t>(goal_id)) {
+                continue;
+            }
+            
+            if (node_pool_[i].is_blocked) continue;  // 已被阻塞
+            
+            // 检查是否在forbidden走廊内
+            bool should_block = false;
+            for (int forbidden : forbidden_corridors) {
+                if (node_pool_[i].corridor_id == forbidden) {
+                    should_block = true;
+                    break;
+                }
+            }
+            
+            if (should_block) {
+                node_pool_[i].is_blocked = true;
+                newly_blocked.push_back(i);
+            }
         }
         
-        // 🔧 CRITICAL FIX: 使用标记而不是删除节点!
-        // 旧代码: node_pool_.erase() → 索引错乱 → goal_id错误 → bad_alloc崩溃
-        // 新代码: is_blocked标记 → 索引稳定 → 正常工作
-        for (int id : blocked_node_ids) {
-            node_pool_[id].is_blocked = true;  // 标记为阻塞
+        // 统计总阻塞情况
+        int total_blockable = node_pool_.size() - 2;  // 排除起点/终点
+        int total_blocked = 0;
+        map<int, int> blocked_by_corridor;
+        for (size_t i = 0; i < node_pool_.size(); i++) {
+            if (i == static_cast<size_t>(start_id) || i == static_cast<size_t>(goal_id)) {
+                continue;  // 跳过起点/终点
+            }
+            if (node_pool_[i].is_blocked) {
+                total_blocked++;
+                blocked_by_corridor[node_pool_[i].corridor_id]++;
+            }
         }
         
-        ROS_INFO("[TopoGraphSearch] 🚧 Attempt %d: Blocked %zu nodes at positions along first path", 
-                 attempt, blocked_node_ids.size());
+        if (newly_blocked.empty()) {
+            ROS_INFO("[TopoGraphSearch] ⚠️ Attempt %d: No new nodes to block", attempt);
+        }
+        
+        ROS_INFO("[TopoGraphSearch] 🚧 Attempt %d: Forbidden corridors %s → %d/%d nodes blocked (%.1f%%)", 
+                 attempt,
+                 [&forbidden_corridors]() {
+                     string s = "[";
+                     for (size_t i = 0; i < forbidden_corridors.size(); i++) {
+                         s += to_string(forbidden_corridors[i]);
+                         if (i < forbidden_corridors.size()-1) s += ", ";
+                     }
+                     return s + "]";
+                 }().c_str(),
+                 total_blocked, total_blockable,
+                 100.0 * total_blocked / total_blockable);
+        
+        // 显示每个走廊的阻塞情况
+        if (!blocked_by_corridor.empty()) {
+            ROS_INFO("[TopoGraphSearch]    Blocked distribution:");
+            for (const auto& pair : blocked_by_corridor) {
+                ROS_INFO("      Corridor %+3d: %d nodes blocked", pair.first, pair.second);
+            }
+        }
         
         // 尝试寻找替代路径
         vector<Vector3d> alt_path;
         if (astarSearch(start, goal, alt_path)) {
+            // 🔧 REMOVED FIX 10: 允许2节点路径（起点→终点直线）
+            // 原因: 直线是最短路径baseline，应保留用于对比绕行路径
+            // 走廊序列比较会自然区分 [0] vs [-5,0]，无需额外拒绝
+            
+            // 🔧 FIX 2: 在smooth之前先检查路径差异
+            // 问题: smooth后两条不同的路径可能变成相同的直线
+            // 解决: 保存smooth前的原始路径用于相似度计算
+            vector<Vector3d> raw_alt_path = alt_path;  // 保存原始路径
+            
             // 验证路径完整性
             if (alt_path.size() < 2) {
                 ROS_DEBUG("[TopoGraphSearch] Rejected incomplete alternative path with %zu waypoints", alt_path.size());
             } else {
-                // 🔧 改进3: 相似度阈值 0.7 → 0.5 (允许更多非同伦路径)
-                // 允许更多拓扑相似但几何不同的路径
-                bool is_different = true;
-                for (const auto& existing_path : paths) {
-                    double similarity = calculatePathSimilarity(alt_path, existing_path);
-                    ROS_INFO("[TopoGraphSearch] 🔍 Path similarity check: attempt %d, similarity=%.3f (threshold=0.5)", 
-                             attempt, similarity);
-                    if (similarity > 0.5) {  // 0.5相似度阈值 (放宽)
-                        is_different = false;
-                        ROS_INFO("[TopoGraphSearch] ❌ Rejected similar path (similarity=%.3f > 0.5)", similarity);
-                        break;
+                // 🔧 FIX 7: 记录路径使用的节点ID,验证是否真的绕行
+                vector<int> used_nodes;
+                for (const auto& waypoint : alt_path) {
+                    int nearest_node_id = -1;
+                    double min_dist = std::numeric_limits<double>::max();
+                    for (size_t i = 0; i < node_pool_.size(); i++) {
+                        double dist = (node_pool_[i].pos - waypoint).norm();
+                        if (dist < min_dist) {
+                            min_dist = dist;
+                            nearest_node_id = i;
+                        }
                     }
+                    if (nearest_node_id >= 0 && 
+                        std::find(used_nodes.begin(), used_nodes.end(), nearest_node_id) == used_nodes.end()) {
+                        used_nodes.push_back(nearest_node_id);
+                    }
+                }
+                
+                // 统计使用的走廊
+                map<int, int> used_corridors;
+                for (int node_id : used_nodes) {
+                    used_corridors[node_pool_[node_id].corridor_id]++;
+                }
+                
+                ROS_INFO("[TopoGraphSearch] 🛣️ Alt path %d uses %zu nodes across %zu corridors:",
+                         attempt, used_nodes.size(), used_corridors.size());
+                for (const auto& pair : used_corridors) {
+                    ROS_INFO("    Corridor %+3d: %d nodes", pair.first, pair.second);
+                }
+                
+                // � OPTIMIZED: 改用走廊序列判断路径差异
+                // 旧方法: Hausdorff距离比较密集waypoint → 难以调优阈值
+                // 新方法: 走廊序列比较 → "只要绕行方式不同就算新路径"
+                // 示例: [0] vs [-5,0] vs [+5,0] → 3条不同路径
+                
+                // 提取当前路径和已有路径的走廊序列
+                vector<int> alt_corridors = extractCorridorSequence(raw_alt_path);
+                
+                ROS_INFO("[TopoGraphSearch] �️ Alt path %d corridor sequence: %s",
+                         attempt, 
+                         [&alt_corridors]() {
+                             string s = "[";
+                             for (size_t i = 0; i < alt_corridors.size(); i++) {
+                                 s += to_string(alt_corridors[i]);
+                                 if (i < alt_corridors.size()-1) s += ", ";
+                             }
+                             return s + "]";
+                         }().c_str());
+                
+                bool is_different = true;
+                
+                for (size_t i = 0; i < paths.size(); i++) {
+                    vector<int> existing_corridors = extractCorridorSequence(paths[i]);
+                    
+                    if (!isCorridorSequenceDifferent(alt_corridors, existing_corridors)) {
+                        // 走廊序列相同 → 拓扑相同
+                        is_different = false;
+                        ROS_INFO("[TopoGraphSearch] ❌ Rejected: same corridor sequence as path %zu", i+1);
+                        break;
+                    } else {
+                        ROS_INFO("[TopoGraphSearch] ✅ Different from path %zu", i+1);
+                    }
+                }
+                
+                // 🔧 FIX 5: 额外检查 - 替代路径是否使用了forbidden走廊的节点（除起点/终点）
+                // 如果替代路径的中间节点仍大量使用forbidden走廊,说明阻塞不够彻底
+                bool uses_forbidden_nodes = false;
+                int forbidden_node_count = 0;
+                for (int node_id : used_nodes) {
+                    // 跳过起点和终点
+                    if (node_id == 0 || node_id == static_cast<int>(node_pool_.size()) - 1) {
+                        continue;
+                    }
+                    // 检查中间节点是否在forbidden走廊
+                    for (int forbidden : forbidden_corridors) {
+                        if (node_pool_[node_id].corridor_id == forbidden) {
+                            forbidden_node_count++;
+                            break;
+                        }
+                    }
+                }
+                
+                if (forbidden_node_count > used_nodes.size() / 3) {  // 超过1/3的节点在forbidden走廊
+                    uses_forbidden_nodes = true;
+                    ROS_INFO("[TopoGraphSearch] ⚠️ Alt path uses %d/%zu nodes from forbidden corridors",
+                             forbidden_node_count, used_nodes.size());
+                }
+                
+                if (uses_forbidden_nodes) {
+                    is_different = false;
+                    ROS_INFO("[TopoGraphSearch] ❌ Rejected: too many nodes from forbidden corridors");
                 }
                 
                 if (is_different) {
                     smoothPath(alt_path);
                     paths.push_back(alt_path);
-                    ROS_INFO("[TopoGraphSearch] ✅ Path %zu: %zu waypoints (blocked %zu nodes)", 
-                             paths.size(), alt_path.size(), blocked_node_ids.size());
+                    path_node_ids.push_back(used_nodes);
+                    ROS_INFO("[TopoGraphSearch] ✅ Path %zu accepted: %zu waypoints", 
+                             paths.size(), alt_path.size());
+                    
+                    // 🔧 FIX 6: 修复新路径主走廊识别
+                    // 问题: used_corridors已经统计好了,直接用它找主走廊
+                    // 旧代码重复计算,且可能有误
+                    int new_corridor = 0;
+                    int max_new_usage = 0;
+                    for (const auto& pair : used_corridors) {
+                        // 只考虑非起点/终点的走廊
+                        // 起点/终点可能在任何走廊,但不应该影响主走廊判断
+                        if (pair.second > max_new_usage) {
+                            max_new_usage = pair.second;
+                            new_corridor = pair.first;
+                        }
+                    }
+                    
+                    // 🔧 FIX 7: 避免重复添加相同走廊
+                    bool already_forbidden = false;
+                    for (int forbidden : forbidden_corridors) {
+                        if (forbidden == new_corridor) {
+                            already_forbidden = true;
+                            break;
+                        }
+                    }
+                    
+                    if (!already_forbidden && new_corridor != main_corridor) {
+                        forbidden_corridors.push_back(new_corridor);
+                        ROS_INFO("[TopoGraphSearch] 🎯 Path %zu main corridor: %+d → added to forbidden list", 
+                                 paths.size(), new_corridor);
+                    } else if (already_forbidden) {
+                        ROS_INFO("[TopoGraphSearch] 📌 Path %zu main corridor: %+d (already forbidden)", 
+                                 paths.size(), new_corridor);
+                    } else {
+                        ROS_INFO("[TopoGraphSearch] 📌 Path %zu main corridor: %+d (same as Path 1)", 
+                                 paths.size(), new_corridor);
+                    }
+                    
                 } else {
                     ROS_DEBUG("[TopoGraphSearch] Attempt %d: Path too similar to existing paths", attempt);
                 }
             }
         } else {
-            ROS_DEBUG("[TopoGraphSearch] Attempt %d: A* failed after blocking %zu nodes", 
-                     attempt, blocked_node_ids.size());
-        }
-        
-        // 恢复节点 (清除阻塞标记)
-        for (int id : blocked_node_ids) {
-            node_pool_[id].is_blocked = false;
+            ROS_WARN("[TopoGraphSearch] Attempt %d: A* failed to find path (graph may be disconnected)", 
+                     attempt);
         }
     }
     
@@ -568,45 +816,141 @@ bool TopoGraphSearch::arePathsSimilar(const vector<Vector3d>& path1,
 
 double TopoGraphSearch::calculatePathSimilarity(const vector<Vector3d>& path1,
                                                 const vector<Vector3d>& path2) {
-    // 🚀 NEW: 计算路径相似度 (0.0 = 完全不同, 1.0 = 完全相同)
-    // 用于更精细的多路径筛选
+    // 🚀 IMPROVED: 使用Hausdorff距离计算路径相似度
+    // 🔧 FIX 8: 排除起点/终点，只比较中间waypoint的拓扑差异
+    // 目标: 当起点/终点相同时，避免它们过度影响相似度
     
     if (path1.empty() || path2.empty()) {
         return 0.0;
     }
     
-    // 方法: 在两条路径上采样,计算平均距离,归一化到[0, 1]
-    int num_samples = 20;  // 增加采样点提高精度
-    double total_dist = 0.0;
-    double path_length = 0.0;
+    // 🔧 关键改进: 只比较中间waypoint (排除起点/终点)
+    vector<Vector3d> middle_path1, middle_path2;
     
-    // 计算path1的总长度作为归一化基准
+    if (path1.size() > 2) {
+        for (size_t i = 1; i < path1.size() - 1; ++i) {
+            middle_path1.push_back(path1[i]);
+        }
+    }
+    
+    if (path2.size() > 2) {
+        for (size_t i = 1; i < path2.size() - 1; ++i) {
+            middle_path2.push_back(path2[i]);
+        }
+    }
+    
+    // 如果没有中间waypoint (只有起点终点), 使用完整路径
+    const vector<Vector3d>& compare_path1 = middle_path1.empty() ? path1 : middle_path1;
+    const vector<Vector3d>& compare_path2 = middle_path2.empty() ? path2 : middle_path2;
+    
+    // 计算路径长度作为归一化基准
+    double path1_length = 0.0;
     for (size_t i = 0; i < path1.size() - 1; ++i) {
-        path_length += (path1[i + 1] - path1[i]).norm();
+        path1_length += (path1[i + 1] - path1[i]).norm();
     }
     
-    if (path_length < 1e-6) {
-        return 1.0;  // 退化路径,认为相同
+    if (path1_length < 1e-6) {
+        return 1.0;  // 退化路径
     }
     
-    // 在路径上采样并比较
-    for (int i = 0; i < num_samples; ++i) {
-        double t = static_cast<double>(i) / (num_samples - 1);
-        
-        size_t idx1 = static_cast<size_t>(t * (path1.size() - 1));
-        size_t idx2 = static_cast<size_t>(t * (path2.size() - 1));
-        
-        total_dist += (path1[idx1] - path2[idx2]).norm();
+    // 双向Hausdorff距离 (只在中间waypoint之间计算)
+    double max_dist_1to2 = 0.0;
+    for (const auto& p1 : compare_path1) {
+        double min_dist = std::numeric_limits<double>::max();
+        for (const auto& p2 : compare_path2) {
+            double dist = (p1 - p2).norm();
+            if (dist < min_dist) {
+                min_dist = dist;
+            }
+        }
+        if (min_dist > max_dist_1to2) {
+            max_dist_1to2 = min_dist;
+        }
     }
     
-    double avg_dist = total_dist / num_samples;
+    // 反向: path2到path1
+    double max_dist_2to1 = 0.0;
+    for (const auto& p2 : compare_path2) {
+        double min_dist = std::numeric_limits<double>::max();
+        for (const auto& p1 : compare_path1) {
+            double dist = (p2 - p1).norm();
+            if (dist < min_dist) {
+                min_dist = dist;
+            }
+        }
+        if (min_dist > max_dist_2to1) {
+            max_dist_2to1 = min_dist;
+        }
+    }
     
-    // 归一化: dist / path_length
-    // dist=0 → similarity=1.0
-    // dist>path_length → similarity=0.0
-    double similarity = 1.0 - std::min(1.0, avg_dist / path_length);
+    // 双向Hausdorff距离 = max(单向距离)
+    double hausdorff_dist = std::max(max_dist_1to2, max_dist_2to1);
+    
+    // 归一化到[0,1]
+    // hausdorff_dist = 0 → similarity = 1.0 (完全相同)
+    // hausdorff_dist ≥ path_length → similarity = 0.0 (完全不同)
+    double similarity = 1.0 - std::min(1.0, hausdorff_dist / path1_length);
+    
+    ROS_DEBUG("[TopoGraphSearch] Similarity calculation: middle waypoints only (%zu vs %zu points)",
+             compare_path1.size(), compare_path2.size());
     
     return similarity;
+}
+
+bool TopoGraphSearch::isCorridorSequenceDifferent(const vector<int>& corridors1,
+                                                   const vector<int>& corridors2) {
+    // 🚀 NEW: 基于走廊序列判断拓扑差异
+    // 用户建议: "只要绕行方式不同应该就算一条新路径"
+    // 策略: 走廊序列不同 = 拓扑不同
+    
+    // 简单比较：序列完全相同 → 相同路径
+    if (corridors1.size() != corridors2.size()) {
+        ROS_DEBUG("[TopoGraphSearch] 🛣️ Corridor sequences differ in length: %zu vs %zu",
+                 corridors1.size(), corridors2.size());
+        return true;  // 不同长度 = 不同拓扑
+    }
+    
+    for (size_t i = 0; i < corridors1.size(); i++) {
+        if (corridors1[i] != corridors2[i]) {
+            ROS_DEBUG("[TopoGraphSearch] 🛣️ Corridor sequences differ at position %zu: %d vs %d",
+                     i, corridors1[i], corridors2[i]);
+            return true;  // 序列不同 = 不同拓扑
+        }
+    }
+    
+    ROS_DEBUG("[TopoGraphSearch] 🛣️ Corridor sequences are identical");
+    return false;  // 序列完全相同 = 相同拓扑
+}
+
+vector<int> TopoGraphSearch::extractCorridorSequence(const vector<Vector3d>& path) {
+    // 🚀 NEW: 提取路径经过的走廊序列
+    // 返回: 去重后的走廊ID序列，例如 [0] 或 [-5, 0] 或 [+5, +10]
+    
+    vector<int> corridor_sequence;
+    
+    for (const auto& waypoint : path) {
+        // 找最近的节点
+        int nearest_node_id = -1;
+        double min_dist = std::numeric_limits<double>::max();
+        for (size_t i = 0; i < node_pool_.size(); i++) {
+            double dist = (node_pool_[i].pos - waypoint).norm();
+            if (dist < min_dist) {
+                min_dist = dist;
+                nearest_node_id = i;
+            }
+        }
+        
+        if (nearest_node_id >= 0) {
+            int corridor_id = node_pool_[nearest_node_id].corridor_id;
+            
+            // 去重: 只添加不同的走廊
+            if (corridor_sequence.empty() || corridor_sequence.back() != corridor_id) {
+                corridor_sequence.push_back(corridor_id);
+            }
+        }
+    }
+    
+    return corridor_sequence;
 }
 
 } // namespace ego_planner
