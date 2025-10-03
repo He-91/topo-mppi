@@ -74,15 +74,18 @@ bool TopoPRM::searchTopoPaths(const Vector3d& start, const Vector3d& goal,
 vector<TopoPath> TopoPRM::findTopoPaths(const Vector3d& start, const Vector3d& goal) {
     vector<TopoPath> paths;
     
-    ROS_INFO("[TopoPRM] Checking direct path...");
-    // Direct path (if collision-free)
+    ROS_INFO("[TopoPRM] ═══════════════════════════════════════");
+    ROS_INFO("[TopoPRM] Finding paths: [%.2f,%.2f,%.2f] → [%.2f,%.2f,%.2f]", 
+             start.x(), start.y(), start.z(), goal.x(), goal.y(), goal.z());
+    
+    // Check direct path first
     vector<Vector3d> direct_path = {start, goal};
     if (isPathValid(direct_path)) {
         double cost = calculatePathCost(direct_path);
         paths.emplace_back(direct_path, cost, 0);
-        ROS_INFO("[TopoPRM] Direct path is valid, cost: %.3f", cost);
+        ROS_INFO("[TopoPRM] ✅ Direct path valid, cost: %.3f", cost);
     } else {
-        ROS_INFO("[TopoPRM] Direct path is blocked, searching for alternative paths");
+        ROS_INFO("[TopoPRM] ❌ Direct path blocked");
     }
     
     // Find obstacles along direct line
@@ -92,14 +95,16 @@ vector<TopoPath> TopoPRM::findTopoPaths(const Vector3d& start, const Vector3d& g
     vector<Vector3d> obstacle_centers;
     
     // Sample along direct path to find obstacles
+    int samples = 0;
     for (double t = step_size_; t < dist; t += step_size_) {
         Vector3d sample_point = start + t * dir;
+        samples++;
         if (grid_map_->getInflateOccupancy(sample_point)) {
             obstacle_centers.push_back(sample_point);
         }
     }
     
-    ROS_INFO("[TopoPRM] Found %zu obstacles along direct path", obstacle_centers.size());
+    ROS_INFO("[TopoPRM] Sampled %d points, found %zu obstacles", samples, obstacle_centers.size());
     
     // Remove duplicate nearby obstacle centers
     vector<Vector3d> filtered_obstacles;
@@ -116,66 +121,53 @@ vector<TopoPath> TopoPRM::findTopoPaths(const Vector3d& start, const Vector3d& g
         }
     }
     
-    ROS_INFO("[TopoPRM] After filtering: %zu obstacles", filtered_obstacles.size());
+    ROS_INFO("[TopoPRM] After filtering: %zu obstacle centers", filtered_obstacles.size());
     
-    // Generate alternative paths using Fast-Planner-inspired approach
+    if (filtered_obstacles.empty()) {
+        ROS_WARN("[TopoPRM] ⚠️ No obstacles found - only direct path available");
+        ROS_INFO("[TopoPRM] ═══════════════════════════════════════");
+        return paths;
+    }
+    
+    // Generate alternative paths - optimized single strategy
     int path_id = 1;
     int total_attempts = 0;
     int valid_paths = 0;
     
-    // For each obstacle, generate multiple alternative paths using different strategies
-    for (const auto& obstacle_center : filtered_obstacles) {
-        // Strategy 1: Circle around obstacle (left and right)
-        for (int side = -1; side <= 1; side += 2) {  // -1 for left, 1 for right
-            total_attempts++;
-            vector<Vector3d> alt_path = generateCircularPath(start, goal, obstacle_center, side);
-            if (!alt_path.empty() && isPathValid(alt_path)) {
-                double cost = calculatePathCost(alt_path);
-                paths.emplace_back(alt_path, cost, path_id++);
-                valid_paths++;
-                ROS_DEBUG("[TopoPRM] Generated circular path %d with cost %.3f", path_id-1, cost);
-            }
-        }
-        
-        // Strategy 2: Over/under obstacle (if 3D environment)
-        for (int vertical = -1; vertical <= 1; vertical += 2) {  // -1 for under, 1 for over
-            total_attempts++;
-            vector<Vector3d> alt_path = generateVerticalPath(start, goal, obstacle_center, vertical);
-            if (!alt_path.empty() && isPathValid(alt_path)) {
-                double cost = calculatePathCost(alt_path);
-                paths.emplace_back(alt_path, cost, path_id++);
-                valid_paths++;
-                ROS_DEBUG("[TopoPRM] Generated vertical path %d with cost %.3f", path_id-1, cost);
-            }
-        }
-        
-        // Strategy 3: Tangent paths (Fast-Planner inspired)
+    // For each obstacle, generate tangent paths (proven most effective)
+    for (size_t obs_idx = 0; obs_idx < filtered_obstacles.size(); ++obs_idx) {
+        const auto& obstacle_center = filtered_obstacles[obs_idx];
+        // Tangent paths: 4 cardinal directions around obstacle
         vector<Vector3d> tangent_points = generateTangentPoints(start, goal, obstacle_center);
-        for (const auto& tangent_pt : tangent_points) {
+        ROS_INFO("[TopoPRM] Obstacle #%zu at [%.2f, %.2f, %.2f]: generated %zu tangent points", 
+                 obs_idx+1, obstacle_center.x(), obstacle_center.y(), obstacle_center.z(), tangent_points.size());
+        
+        for (size_t tp_idx = 0; tp_idx < tangent_points.size(); ++tp_idx) {
+            const auto& tangent_pt = tangent_points[tp_idx];
             total_attempts++;
             vector<Vector3d> alt_path = {start, tangent_pt, goal};
-            if (isPathValid(alt_path)) {
+            
+            // Check collision for each segment
+            bool start_to_tangent_ok = isLineCollisionFree(start, tangent_pt);
+            bool tangent_to_goal_ok = isLineCollisionFree(tangent_pt, goal);
+            
+            if (start_to_tangent_ok && tangent_to_goal_ok) {
                 double cost = calculatePathCost(alt_path);
                 paths.emplace_back(alt_path, cost, path_id++);
                 valid_paths++;
-                ROS_DEBUG("[TopoPRM] Generated tangent path %d with cost %.3f", path_id-1, cost);
-            }
-        }
-        
-        // Fallback: Keep original four-directional approach for compatibility
-        for (int direction = 0; direction < 4; ++direction) {
-            total_attempts++;
-            vector<Vector3d> alt_path = generateAlternativePath(start, goal, 
-                                                               obstacle_center, direction);
-            if (!alt_path.empty() && isPathValid(alt_path)) {
-                double cost = calculatePathCost(alt_path);
-                paths.emplace_back(alt_path, cost, path_id++);
-                valid_paths++;
+                ROS_INFO("[TopoPRM]   ✅ Path %d: via [%.2f, %.2f, %.2f], cost=%.3f", 
+                         path_id-1, tangent_pt.x(), tangent_pt.y(), tangent_pt.z(), cost);
+            } else {
+                ROS_WARN("[TopoPRM]   ❌ Rejected tangent #%zu: start→tangent=%s, tangent→goal=%s",
+                          tp_idx+1, 
+                          start_to_tangent_ok ? "OK" : "COLLISION",
+                          tangent_to_goal_ok ? "OK" : "COLLISION");
             }
         }
     }
     
-    ROS_INFO("[TopoPRM] Generated %d alternative paths from %d attempts", valid_paths, total_attempts);
+    ROS_INFO("[TopoPRM] Generated %d valid paths from %d attempts (%.1f%% success)", 
+             valid_paths, total_attempts, total_attempts > 0 ? 100.0*valid_paths/total_attempts : 0.0);
     
     // If no paths found at all, try to generate a simple path with more points
     if (paths.empty()) {
@@ -493,34 +485,49 @@ vector<Vector3d> TopoPRM::generateTangentPoints(const Vector3d& start,
                                                const Vector3d& obstacle_center) {
     vector<Vector3d> tangent_points;
     
-    // Get the direction from obstacle to start
-    Vector3d obs_to_start = (start - obstacle_center).normalized();
+    // Get perpendicular direction to start-goal line
+    Vector3d start_to_goal = (goal - start).normalized();
+    Vector3d perp_horizontal = start_to_goal.cross(Vector3d(0, 0, 1)).normalized();
     
-    // Calculate tangent points around the obstacle
-    double obstacle_radius = search_radius_ * 0.8;
+    if (perp_horizontal.norm() < 1e-3) {
+        perp_horizontal = Vector3d(1, 0, 0); // Fallback if vertical
+    }
     
-    // Generate multiple tangent points around the obstacle
-    for (int i = 0; i < 8; ++i) {  // 8 directions around obstacle
-        double angle = i * M_PI / 4.0;  // 45-degree increments
+    // Calculate avoidance radius (INCREASED for better clearance)
+    double avoidance_radius = search_radius_ * 1.5;  // 从1.2增加到1.5
+    
+    // Generate 4 cardinal tangent points (left, right, up, down)
+    vector<Vector3d> directions = {
+        perp_horizontal,           // Left
+        -perp_horizontal,          // Right
+        Vector3d(0, 0, 1),        // Up
+        Vector3d(0, 0, -1)        // Down
+    };
+    
+    for (const auto& dir : directions) {
+        Vector3d tangent_point = obstacle_center + dir * avoidance_radius;
         
-        // Rotate the vector from obstacle to start by the angle
-        Vector3d tangent_dir(
-            cos(angle) * obs_to_start.x() - sin(angle) * obs_to_start.y(),
-            sin(angle) * obs_to_start.x() + cos(angle) * obs_to_start.y(),
-            obs_to_start.z()
-        );
+        // Validate: collision-free
+        if (grid_map_->getInflateOccupancy(tangent_point)) {
+            ROS_DEBUG("[TopoPRM] Tangent point [%.2f,%.2f,%.2f] rejected: in obstacle",
+                      tangent_point.x(), tangent_point.y(), tangent_point.z());
+            continue;
+        }
         
-        Vector3d tangent_point = obstacle_center + tangent_dir * (obstacle_radius + search_radius_ * 0.5);
-        
-        // Check if this tangent point makes sense geometrically
+        // Validate: not too long (RELAXED from 1.8 to 2.5)
         double dist_to_start = (tangent_point - start).norm();
         double dist_to_goal = (tangent_point - goal).norm();
         double direct_dist = (goal - start).norm();
         
-        // Only add if it's not too much longer than direct path
-        if (dist_to_start + dist_to_goal < direct_dist * 2.0) {
-            tangent_points.push_back(tangent_point);
+        if (dist_to_start + dist_to_goal > direct_dist * 2.5) {  // 从1.8放宽到2.5
+            ROS_DEBUG("[TopoPRM] Tangent point rejected: too long (%.2f vs %.2f)",
+                      dist_to_start + dist_to_goal, direct_dist * 2.5);
+            continue;
         }
+        
+        tangent_points.push_back(tangent_point);
+        ROS_DEBUG("[TopoPRM] ✅ Tangent point accepted: [%.2f,%.2f,%.2f]",
+                  tangent_point.x(), tangent_point.y(), tangent_point.z());
     }
     
     return tangent_points;

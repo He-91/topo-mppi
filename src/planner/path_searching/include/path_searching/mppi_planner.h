@@ -70,6 +70,13 @@ private:
                           const Eigen::Vector3d& goal_vel,
                           MPPITrajectory& trajectory);
     
+    void rolloutTrajectory(const Eigen::Vector3d& start_pos,
+                          const Eigen::Vector3d& start_vel,
+                          const Eigen::Vector3d& goal_pos,
+                          const Eigen::Vector3d& goal_vel,
+                          const std::vector<Eigen::Vector3d>& guide_path,
+                          MPPITrajectory& trajectory);
+    
     double calculateTrajectoryCost(const MPPITrajectory& trajectory,
                                   const Eigen::Vector3d& goal_pos,
                                   const Eigen::Vector3d& goal_vel);
@@ -104,6 +111,14 @@ public:
                        const Eigen::Vector3d& start_vel,
                        const Eigen::Vector3d& goal_pos,
                        const Eigen::Vector3d& goal_vel,
+                       MPPITrajectory& optimal_trajectory);
+    
+    // Overload: with initial path guidance (for topological paths)
+    bool planTrajectory(const Eigen::Vector3d& start_pos,
+                       const Eigen::Vector3d& start_vel,
+                       const Eigen::Vector3d& goal_pos,
+                       const Eigen::Vector3d& goal_vel,
+                       const std::vector<Eigen::Vector3d>& initial_path,
                        MPPITrajectory& optimal_trajectory);
     
     // Local path planning interface (for replacing A* in B-spline optimizer)

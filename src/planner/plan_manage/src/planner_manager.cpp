@@ -265,7 +265,9 @@ namespace ego_planner
     bool use_parallel_mppi = pp_.use_parallel_mppi_optimization;  // New parameter for multi-path MPPI
     
     if (topo_planner_ != nullptr && planWithTopo(start_pt, local_target_pt, topo_paths)) {
-        ROS_INFO("[PlannerManager] Found %zu topological paths", topo_paths.size());
+        ROS_WARN("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        ROS_INFO("[PlannerManager] STEP 1: Topological Planning");
+        ROS_INFO("[PlannerManager]   Found %zu topological paths", topo_paths.size());
         
         // Ensure we have valid paths before processing
         if (!topo_paths.empty()) {
@@ -273,7 +275,8 @@ namespace ego_planner
             
             // 🚀 NEW: Multi-path MPPI optimization
             if (use_parallel_mppi && mppi_planner_ != nullptr && topo_paths.size() > 1) {
-                ROS_INFO("[PlannerManager] 🚀 Parallel MPPI: Optimizing all %zu topological paths...", topo_paths.size());
+                ROS_INFO("[PlannerManager] STEP 2: Parallel MPPI Optimization");
+                ROS_INFO("[PlannerManager]   🚀 Optimizing all %zu topological paths...", topo_paths.size());
                 
                 struct MPPICandidate {
                     TopoPath topo_path;
@@ -311,11 +314,14 @@ namespace ego_planner
                         dense_path = tmp_dense;
                     }
                     
-                    // Run MPPI on this path
+                    // Run MPPI on this path with topo guidance
                     ROS_INFO("[PlannerManager]   Path %zu/%zu (topo_cost=%.3f, waypoints=%zu): Running MPPI...", 
                              i+1, topo_paths.size(), topo_paths[i].cost, dense_path.size());
                     
-                    bool mppi_success = planWithMPPI(start_pt, current_vel, local_target_pt, target_vel, candidate.mppi_result);
+                    // ✅ FIX: Pass dense_path to guide MPPI optimization
+                    bool mppi_success = mppi_planner_->planTrajectory(start_pt, current_vel, 
+                                                                     local_target_pt, target_vel, 
+                                                                     dense_path, candidate.mppi_result);
                     
                     if (mppi_success && candidate.mppi_result.positions.size() >= 7) {
                         // Calculate normalized cost (cost per unit length)
@@ -328,12 +334,15 @@ namespace ego_planner
                         
                         ROS_INFO("[PlannerManager]   Path %zu: MPPI ✅ cost=%.3f, norm_cost=%.3f, length=%.2fm", 
                                  i+1, candidate.mppi_result.cost, candidate.normalized_cost, path_length);
-                        
-                        // 🎨 Visualize this TOPO path + its MPPI result
-                        visualizeTopoMPPIPaths(i, topo_paths[i], candidate.mppi_result, false);
                     } else {
                         ROS_WARN("[PlannerManager]   Path %zu: MPPI ❌ failed", i+1);
+                        // Use topo path as fallback for visualization
+                        candidate.mppi_result.positions = dense_path;
+                        candidate.mppi_result.cost = topo_paths[i].cost;
                     }
+                    
+                    // 🎨 Visualize ALL paths (success or failed)
+                    visualizeTopoMPPIPaths(i, topo_paths[i], candidate.mppi_result, false);
                     
                     mppi_candidates.push_back(candidate);
                 }
@@ -349,8 +358,11 @@ namespace ego_planner
                 }
                 
                 if (best_idx >= 0) {
-                    ROS_INFO("[PlannerManager] 🏆 Best MPPI result: Path %d with normalized_cost=%.3f", 
+                    ROS_INFO("[PlannerManager]   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    ROS_INFO("[PlannerManager]   🏆 Best MPPI: Path #%d with normalized_cost=%.3f", 
                              best_idx+1, best_norm_cost);
+                    ROS_INFO("[PlannerManager]   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    ROS_WARN("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
                     
                     // 🎨 Highlight the best path
                     visualizeTopoMPPIPaths(best_idx, mppi_candidates[best_idx].topo_path,
@@ -361,9 +373,9 @@ namespace ego_planner
                     UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
                     use_mppi_topo_path = true;
                     
-                    ROS_INFO("[PlannerManager] Parallel MPPI optimization succeeded with %zu points", point_set.size());
+                    ROS_INFO("[PlannerManager]   Using MPPI result with %zu points", point_set.size());
                 } else {
-                    ROS_WARN("[PlannerManager] All MPPI optimizations failed, fallback to best topo path");
+                    ROS_WARN("[PlannerManager]   ❌ All MPPI failed, fallback to best topo path");
                     best_path = topo_planner_->selectBestPath(topo_paths);
                 }
             } else {
@@ -466,15 +478,23 @@ namespace ego_planner
     t_start = ros::Time::now();
 
     /*** STEP 3: B-SPLINE SMOOTHING ***/
+    ROS_WARN("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    ROS_INFO("[PlannerManager] STEP 3: B-spline smoothing (ONLY smoothing, NOT planning!)");
+    ROS_INFO("[PlannerManager]   Input: %d control points from TOPO/MPPI", (int)ctrl_pts.rows());
+    
     // 🎨 Final smoothing and collision avoidance refinement
     bool flag_step_1_success = bspline_optimizer_rebound_->BsplineOptimizeTrajRebound(ctrl_pts, ts);
-    cout << "bspline_optimize_success=" << flag_step_1_success << endl;
+    
+    ROS_INFO("[PlannerManager]   B-spline result: %s", flag_step_1_success ? "✅ SUCCESS" : "❌ FAILED");
+    
     if (!flag_step_1_success)
     {
+      ROS_WARN("[PlannerManager]   ⚠️ B-spline failed - this should be rare (TOPO/MPPI should avoid obstacles)");
       // visualization_->displayOptimalList( ctrl_pts, vis_id );
       continous_failures_count_++;
       return false;
     }
+    ROS_WARN("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     //visualization_->displayOptimalList( ctrl_pts, vis_id );
 
     t_opt = ros::Time::now() - t_start;
@@ -779,7 +799,7 @@ namespace ego_planner
     // Get frame_id from grid_map
     std::string frame_id = "world";
     
-    // 1. 🟥 TOPO Original Path (Thick line)
+    // 1. 🟥 TOPO Original Path (Medium line, semi-transparent)
     visualization_msgs::Marker topo_marker;
     topo_marker.header.frame_id = frame_id;
     topo_marker.header.stamp = ros::Time::now();
@@ -789,12 +809,12 @@ namespace ego_planner
     topo_marker.action = visualization_msgs::Marker::ADD;
     topo_marker.pose.orientation.w = 1.0;
     
-    // Thick line for TOPO path
-    topo_marker.scale.x = 0.15;
+    // Medium line for TOPO path
+    topo_marker.scale.x = 0.10;  // Thinner than before
     topo_marker.color.r = color.r;
     topo_marker.color.g = color.g;
     topo_marker.color.b = color.b;
-    topo_marker.color.a = 0.9;
+    topo_marker.color.a = 0.5;  // More transparent
     
     for (const auto& pt : topo_path.path) {
       geometry_msgs::Point p;
@@ -803,7 +823,7 @@ namespace ego_planner
     }
     marker_array.markers.push_back(topo_marker);
     
-    // 2. 🔷 MPPI Optimized Path (Thin line, same color)
+    // 2. 🔷 MPPI Optimized Path (Thicker, more opaque)
     visualization_msgs::Marker mppi_marker;
     mppi_marker.header = topo_marker.header;
     mppi_marker.ns = "mppi_path";
@@ -812,12 +832,12 @@ namespace ego_planner
     mppi_marker.action = visualization_msgs::Marker::ADD;
     mppi_marker.pose.orientation.w = 1.0;
     
-    // Thin line for MPPI (or thick if best)
-    mppi_marker.scale.x = is_best ? 0.20 : 0.08;
+    // Thicker line for MPPI (or thickest if best)
+    mppi_marker.scale.x = is_best ? 0.25 : 0.15;  // Larger for visibility
     mppi_marker.color.r = color.r;
     mppi_marker.color.g = color.g;
     mppi_marker.color.b = color.b;
-    mppi_marker.color.a = is_best ? 1.0 : 0.6;  // Opaque if best
+    mppi_marker.color.a = is_best ? 1.0 : 0.8;  // More opaque
     
     for (const auto& pt : mppi_result.positions) {
       geometry_msgs::Point p;

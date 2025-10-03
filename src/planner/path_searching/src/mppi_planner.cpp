@@ -92,6 +92,66 @@ bool MPPIPlanner::planTrajectory(const Vector3d& start_pos,
     return true;
 }
 
+// ✅ NEW: planTrajectory with initial path guidance
+bool MPPIPlanner::planTrajectory(const Vector3d& start_pos,
+                                const Vector3d& start_vel,
+                                const Vector3d& goal_pos,
+                                const Vector3d& goal_vel,
+                                const vector<Vector3d>& initial_path,
+                                MPPITrajectory& optimal_trajectory) {
+    
+    vector<MPPITrajectory> trajectories(num_samples_);
+    double min_cost = std::numeric_limits<double>::max();
+    
+    // Generate rollout trajectories guided by initial path
+    for (int i = 0; i < num_samples_; ++i) {
+        trajectories[i].resize(horizon_steps_);
+        rolloutTrajectory(start_pos, start_vel, goal_pos, goal_vel, initial_path, trajectories[i]);
+        
+        double cost = calculateTrajectoryCost(trajectories[i], goal_pos, goal_vel);
+        trajectories[i].cost = cost;
+        
+        if (cost < min_cost) {
+            min_cost = cost;
+        }
+    }
+    
+    if (min_cost >= std::numeric_limits<double>::max()) {
+        ROS_WARN("[MPPI] All guided trajectories have infinite cost");
+        return false;
+    }
+    
+    // Calculate importance weights
+    double weight_sum = 0.0;
+    for (auto& traj : trajectories) {
+        traj.weight = exp(-(traj.cost - min_cost) / lambda_);
+        weight_sum += traj.weight;
+    }
+    
+    // Normalize weights
+    if (weight_sum > 1e-8) {
+        for (auto& traj : trajectories) {
+            traj.weight /= weight_sum;
+        }
+    } else {
+        ROS_WARN("[MPPI] Weight sum too small, using uniform weights");
+        for (auto& traj : trajectories) {
+            traj.weight = 1.0 / num_samples_;
+        }
+    }
+    
+    // Compute weighted average trajectory
+    optimal_trajectory = weightedAverage(trajectories);
+    
+    // Visualize
+    visualizeTrajectories(trajectories);
+    visualizeOptimalTrajectory(optimal_trajectory);
+    
+    ROS_INFO("[MPPI] Guided trajectory with cost: %.3f (using %zu waypoints)", 
+             optimal_trajectory.cost, initial_path.size());
+    return true;
+}
+
 void MPPIPlanner::rolloutTrajectory(const Vector3d& start_pos,
                                    const Vector3d& start_vel,
                                    const Vector3d& goal_pos,
@@ -109,6 +169,97 @@ void MPPIPlanner::rolloutTrajectory(const Vector3d& start_pos,
         Vector3d vel_error = goal_vel - trajectory.velocities[t-1];
         
         // Simple PD control for nominal trajectory
+        Vector3d nominal_acc = 2.0 * pos_error + 1.0 * vel_error;
+        
+        // Add noise to control
+        Vector3d noise_acc(
+            sigma_acc_ * normal_dist_(generator_),
+            sigma_acc_ * normal_dist_(generator_),
+            sigma_acc_ * normal_dist_(generator_)
+        );
+        
+        trajectory.accelerations[t] = nominal_acc + noise_acc;
+        
+        // Apply dynamic constraints
+        constrainDynamics(trajectory.velocities[t-1], trajectory.accelerations[t]);
+        
+        // Forward integrate dynamics
+        trajectory.velocities[t] = trajectory.velocities[t-1] + trajectory.accelerations[t] * dt_;
+        trajectory.positions[t] = trajectory.positions[t-1] + trajectory.velocities[t-1] * dt_ + 
+                                 0.5 * trajectory.accelerations[t] * dt_ * dt_;
+        
+        // Add position noise
+        Vector3d pos_noise(
+            sigma_pos_ * normal_dist_(generator_),
+            sigma_pos_ * normal_dist_(generator_),
+            sigma_pos_ * normal_dist_(generator_)
+        );
+        trajectory.positions[t] += pos_noise;
+        
+        // Add velocity noise
+        Vector3d vel_noise(
+            sigma_vel_ * normal_dist_(generator_),
+            sigma_vel_ * normal_dist_(generator_),
+            sigma_vel_ * normal_dist_(generator_)
+        );
+        trajectory.velocities[t] += vel_noise;
+        
+        // Constrain velocities
+        if (trajectory.velocities[t].norm() > max_velocity_) {
+            trajectory.velocities[t] = trajectory.velocities[t].normalized() * max_velocity_;
+        }
+    }
+}
+
+// ✅ NEW: rolloutTrajectory with path guidance
+void MPPIPlanner::rolloutTrajectory(const Vector3d& start_pos,
+                                   const Vector3d& start_vel,
+                                   const Vector3d& goal_pos,
+                                   const Vector3d& goal_vel,
+                                   const vector<Vector3d>& guide_path,
+                                   MPPITrajectory& trajectory) {
+    // Initialize trajectory
+    trajectory.positions[0] = start_pos;
+    trajectory.velocities[0] = start_vel;
+    trajectory.accelerations[0] = Vector3d::Zero();
+    
+    // Precompute path segment lengths for interpolation
+    vector<double> segment_lengths;
+    double total_length = 0.0;
+    if (guide_path.size() >= 2) {
+        for (size_t i = 1; i < guide_path.size(); ++i) {
+            double len = (guide_path[i] - guide_path[i-1]).norm();
+            segment_lengths.push_back(len);
+            total_length += len;
+        }
+    }
+    
+    // Generate noisy control inputs guided by path
+    for (int t = 1; t < horizon_steps_; ++t) {
+        // Find target point on guide path based on time
+        Vector3d target_point = goal_pos;
+        
+        if (!guide_path.empty() && total_length > 1e-3) {
+            // Interpolate along guide path based on progress ratio
+            double progress_ratio = (double)t / horizon_steps_;
+            double target_dist = progress_ratio * total_length;
+            
+            double accumulated_dist = 0.0;
+            for (size_t i = 0; i < segment_lengths.size(); ++i) {
+                if (accumulated_dist + segment_lengths[i] >= target_dist) {
+                    // Interpolate within this segment
+                    double local_ratio = (target_dist - accumulated_dist) / segment_lengths[i];
+                    target_point = guide_path[i] + local_ratio * (guide_path[i+1] - guide_path[i]);
+                    break;
+                }
+                accumulated_dist += segment_lengths[i];
+            }
+        }
+        
+        // Calculate control towards target point (path-guided PD)
+        Vector3d pos_error = target_point - trajectory.positions[t-1];
+        Vector3d vel_error = goal_vel - trajectory.velocities[t-1];
+        
         Vector3d nominal_acc = 2.0 * pos_error + 1.0 * vel_error;
         
         // Add noise to control
