@@ -882,6 +882,9 @@ namespace ego_planner
     bool flag_force_return, flag_occ, success;
     new_lambda2_ = lambda2_;
     constexpr int MAX_RESART_NUMS_SET = 3;
+
+    // Disable rebound loop - only do one optimization pass for smoothing only
+    // If rebound is attempted, log it as per user requirement
     do
     {
       /* ---------- prepare ---------- */
@@ -960,6 +963,7 @@ namespace ego_planner
         flag_force_return = true;
         rebound_times++;
         cout << "iter=" << iter_num_ << ",time(ms)=" << time_ms << ",rebound." << endl;
+        ROS_WARN("[B-spline] Rebound attempted but disabled - B-spline is now smoothing-only!");
       }
       else
       {
@@ -967,8 +971,7 @@ namespace ego_planner
         // while (ros::ok());
       }
 
-    } while ((flag_occ && restart_nums < MAX_RESART_NUMS_SET) ||
-             (flag_force_return && force_stop_type_ == STOP_FOR_REBOUND && rebound_times <= 20));
+    } while (false); // Disabled rebound loop - only one pass for smoothing
 
     return success;
   }
@@ -988,12 +991,14 @@ namespace ego_planner
     double origin_lambda4 = lambda4_;
     bool flag_safe = true;
     int iter_count = 0;
+
+    // Disable refine loop - only do one optimization pass for smoothing only
+    // If refine adjustments are attempted, log it as per user requirement
     do
     {
       lbfgs::lbfgs_parameter_t lbfgs_params;
       lbfgs::lbfgs_load_default_parameters(&lbfgs_params);
       lbfgs_params.mem_size = 16;
-      lbfgs_params.max_iterations = 200;
       lbfgs_params.g_epsilon = 0.001;
 
       int result = lbfgs::lbfgs_optimize(variable_num_, q, &final_cost, BsplineOptimizer::costFunctionRefine, NULL, NULL, this, &lbfgs_params);
@@ -1019,12 +1024,7 @@ namespace ego_planner
         {
           // cout << "Refined traj hit_obs, t=" << t << " P=" << traj.evaluateDeBoorT(t).transpose() << endl;
 
-          Eigen::MatrixXd ref_pts(ref_pts_.size(), 3);
-          for (size_t i = 0; i < ref_pts_.size(); i++)
-          {
-            ref_pts.row(i) = ref_pts_[i].transpose();
-          }
-
+          ROS_WARN("[B-spline] Refine adjustment attempted but disabled - B-spline is now smoothing-only!");
           flag_safe = false;
           break;
         }
@@ -1034,7 +1034,7 @@ namespace ego_planner
         lambda4_ *= 2;
 
       iter_count++;
-    } while (!flag_safe && iter_count <= 0);
+    } while (false); // Disabled refine loop - only one pass for smoothing
 
     lambda4_ = origin_lambda4;
 
