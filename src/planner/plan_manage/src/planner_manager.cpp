@@ -447,12 +447,10 @@ namespace ego_planner
     // 🚀 Apply MPPI optimization to topological path (if available)
     // MPPI considers dynamics, ESDF, and control smoothness
     
-  // Force MPPI to run on every planning cycle when MPPI planner is available.
-  // Previously this step could be skipped if parallel MPPI was applied in STEP 1.5.
-  // Requirement: MPPI should always run (even for single-path cases) to ensure
-  // dynamic feasibility and consistent optimization results.
-  if (mppi_planner_ != nullptr) {
-    ROS_INFO("[PlannerManager] STEP 2: MPPI Optimization (forced run)");
+    // Note: If parallel MPPI was used in STEP 1.5, this step is skipped
+    // as MPPI optimization was already applied to all topological paths
+    if (use_mppi_topo_path && !use_parallel_mppi && mppi_planner_ != nullptr) {
+        ROS_INFO("[PlannerManager] Applying MPPI dynamic optimization with ESDF...");
         
         Eigen::Vector3d current_vel = start_vel;
         Eigen::Vector3d target_vel = local_target_vel;
@@ -479,7 +477,9 @@ namespace ego_planner
         
         ros::Duration mppi_time = ros::Time::now() - t_start;
         ROS_INFO("[PlannerManager] MPPI optimization took %.3f ms", mppi_time.toSec() * 1000.0);
-  }
+    } else if (use_parallel_mppi) {
+        ROS_INFO("[PlannerManager] Skipping STEP 2: Parallel MPPI already applied in STEP 1.5");
+    }
 
     t_start = ros::Time::now();
 
