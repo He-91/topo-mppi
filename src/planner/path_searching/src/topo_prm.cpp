@@ -123,8 +123,9 @@ bool TopoPRM::searchTopoPaths(const Vector3d& start, const Vector3d& goal,
     ROS_INFO("[TopoPRM]   原始路径: %zu", raw_paths.size());
     ROS_INFO("[TopoPRM]   唯一路径: %zu", unique_paths.size());
     ROS_INFO("[TopoPRM]   最终路径: %zu", topo_paths.size());
-    ROS_INFO("[TopoPRM]   🎯 多路径触发: %s", 
-             topo_paths.size() > 1 ? "✅ YES (MPPI will run!)" : "❌ NO");
+    // Note: MPPI triggering is handled by PlannerManager. Here we report path counts.
+    ROS_INFO("[TopoPRM]   🎯 多路径触发 (多于1条): %s", 
+             topo_paths.size() > 1 ? "✅" : "❌");
     ROS_INFO("[TopoPRM] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     // Visualize
