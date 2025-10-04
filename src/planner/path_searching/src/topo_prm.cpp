@@ -9,10 +9,25 @@ namespace ego_planner {
 
 TopoPRM::TopoPRM() 
     : step_size_(0.2), search_radius_(5.0), max_sample_num_(1000), 
-      collision_check_resolution_(0.05) {
+      collision_check_resolution_(0.2),  // 进一步放宽碰撞检测
+      max_raw_paths_(50),               // 🚀 NEW: DFS最大原始路径数
+      reserve_num_(8),                  // 🚀 NEW: 保留8条最短路径
+      clearance_(0.8),                  // 🚀 NEW: 节点最小安全距离0.8m
+      sample_inflate_(3.0),             // 🚀 NEW: 椭球采样膨胀3m
+      ratio_to_short_(2.5),             // 🚀 NEW: 最短路径2.5倍以内保留
+      discretize_points_num_(30) {      // 🚀 NEW: 拓扑去重离散化30点
 }
 
 TopoPRM::~TopoPRM() {
+    clearGraph();
+}
+
+void TopoPRM::clearGraph() {
+    for (auto node : graph_nodes_) {
+        delete node;
+    }
+    graph_nodes_.clear();
+    raw_paths_.clear();
 }
 
 void TopoPRM::init(ros::NodeHandle& nh, GridMap::Ptr grid_map) {
@@ -22,43 +37,103 @@ void TopoPRM::init(ros::NodeHandle& nh, GridMap::Ptr grid_map) {
     // Get frame_id from node parameter, default to "world" if not set
     nh.param("grid_map/frame_id", frame_id_, std::string("world"));
     
-    ROS_INFO("[TopoPRM] Initialized publisher on topic '/topo_paths'");
-    ROS_INFO("[TopoPRM] Initialized with step_size: %f, search_radius: %f, frame_id: %s", 
-             step_size_, search_radius_, frame_id_.c_str());
-    ROS_INFO("[TopoPRM] Using Legacy 4-direction TopoPRM (TGK removed)");
+    ROS_INFO("[TopoPRM] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    ROS_INFO("[TopoPRM] 🚀 FAST-PLANNER PRM OPTIMIZATION v3.0:");
+    ROS_INFO("[TopoPRM]   采样策略: 椭球自由空间采样 (inflate=%.1fm)", sample_inflate_);
+    ROS_INFO("[TopoPRM]   可见性图: 全局连接 (clearance=%.2fm)", clearance_);
+    ROS_INFO("[TopoPRM]   路径搜索: DFS多路径 (max=%d)", max_raw_paths_);
+    ROS_INFO("[TopoPRM]   拓扑去重: 智能过滤 (discretize=%d points)", discretize_points_num_);
+    ROS_INFO("[TopoPRM]   保留路径: %d条最优路径", reserve_num_);
+    ROS_INFO("[TopoPRM]   collision_check: %.2fm", collision_check_resolution_);
+    ROS_INFO("[TopoPRM]   frame_id: %s", frame_id_.c_str());
+    ROS_INFO("[TopoPRM]   🎯 目标: >60%% 多路径生成率!");
+    ROS_INFO("[TopoPRM] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 }
 
 bool TopoPRM::searchTopoPaths(const Vector3d& start, const Vector3d& goal,
                              vector<TopoPath>& topo_paths) {
     topo_paths.clear();
     
-    ROS_INFO("[TopoPRM] Searching topological paths from [%.2f, %.2f, %.2f] to [%.2f, %.2f, %.2f]", 
+    ROS_INFO("[TopoPRM] ═══════════════════════════════════════════════════════");
+    ROS_INFO("[TopoPRM] 🚀 Fast-Planner PRM: [%.2f,%.2f,%.2f] → [%.2f,%.2f,%.2f]", 
              start.x(), start.y(), start.z(), goal.x(), goal.y(), goal.z());
     
-    // Use Legacy 4-direction TopoPRM (stable, tested, working)
-    ROS_INFO("[TopoPRM] Using Legacy 4-direction TopoPRM");
-    vector<TopoPath> candidate_paths = findTopoPaths(start, goal);
+    // Step 1: 椭球采样 (Week 1)
+    ROS_INFO("[TopoPRM] STEP 1: 椭球自由空间采样...");
+    vector<Vector3d> sample_points = sampleFreeSpaceInEllipsoid(start, goal, 100);
+    ROS_INFO("[TopoPRM]   采样到 %zu 个有效点", sample_points.size());
     
-    if (candidate_paths.empty()) {
-        ROS_WARN("[TopoPRM] No valid topological paths found");
-        return false;
+    if (sample_points.size() < 10) {
+        ROS_WARN("[TopoPRM] 采样点太少，回退到Legacy方法");
+        vector<TopoPath> legacy_paths = findTopoPathsLegacy(start, goal);
+        topo_paths = legacy_paths;
+        visualizeTopoPaths(topo_paths);
+        return !topo_paths.empty();
     }
     
-    ROS_INFO("[TopoPRM] Generated %zu candidate paths", candidate_paths.size());
+    // Step 2: 构建可见性图 (Week 2)
+    ROS_INFO("[TopoPRM] STEP 2: 构建可见性图...");
+    buildVisibilityGraph(start, goal, sample_points);
+    ROS_INFO("[TopoPRM]   图节点数: %zu", graph_nodes_.size());
     
-    // Sort paths by cost
-    sort(candidate_paths.begin(), candidate_paths.end(),
-         [](const TopoPath& a, const TopoPath& b) {
-             return a.cost < b.cost;
-         });
+    if (graph_nodes_.size() < 3) {
+        ROS_WARN("[TopoPRM] 图节点太少，回退到Legacy方法");
+        clearGraph();
+        vector<TopoPath> legacy_paths = findTopoPathsLegacy(start, goal);
+        topo_paths = legacy_paths;
+        visualizeTopoPaths(topo_paths);
+        return !topo_paths.empty();
+    }
     
-    topo_paths = candidate_paths;
+    // Step 3: DFS多路径搜索 (Week 3)
+    ROS_INFO("[TopoPRM] STEP 3: DFS多路径搜索...");
+    GraphNode* start_node = graph_nodes_[0];
+    GraphNode* goal_node = graph_nodes_[1];
+    vector<vector<Vector3d>> raw_paths = searchMultiplePaths(start_node, goal_node);
+    ROS_INFO("[TopoPRM]   原始路径数: %zu", raw_paths.size());
     
-    // Visualize paths
+    if (raw_paths.empty()) {
+        ROS_WARN("[TopoPRM] 未找到路径，回退到Legacy方法");
+        clearGraph();
+        vector<TopoPath> legacy_paths = findTopoPathsLegacy(start, goal);
+        topo_paths = legacy_paths;
+        visualizeTopoPaths(topo_paths);
+        return !topo_paths.empty();
+    }
+    
+    // Step 4: 拓扑去重 (Week 4)
+    ROS_INFO("[TopoPRM] STEP 4: 拓扑等价性去重...");
+    vector<vector<Vector3d>> unique_paths = pruneEquivalentPaths(raw_paths);
+    ROS_INFO("[TopoPRM]   去重后路径数: %zu", unique_paths.size());
+    
+    // Step 5: 选择最短路径
+    ROS_INFO("[TopoPRM] STEP 5: 选择最优路径...");
+    vector<vector<Vector3d>> selected_paths = selectShortPaths(unique_paths);
+    ROS_INFO("[TopoPRM]   最终选择: %zu 条路径", selected_paths.size());
+    
+    // 转换为TopoPath格式
+    for (size_t i = 0; i < selected_paths.size(); ++i) {
+        double cost = calculatePathCost(selected_paths[i]);
+        topo_paths.emplace_back(selected_paths[i], cost, i);
+    }
+    
+    ROS_INFO("[TopoPRM] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    ROS_INFO("[TopoPRM] 📊 PRM搜索总结:");
+    ROS_INFO("[TopoPRM]   采样点: %zu", sample_points.size());
+    ROS_INFO("[TopoPRM]   原始路径: %zu", raw_paths.size());
+    ROS_INFO("[TopoPRM]   唯一路径: %zu", unique_paths.size());
+    ROS_INFO("[TopoPRM]   最终路径: %zu", topo_paths.size());
+    ROS_INFO("[TopoPRM]   🎯 多路径触发: %s", 
+             topo_paths.size() > 1 ? "✅ YES (MPPI will run!)" : "❌ NO");
+    ROS_INFO("[TopoPRM] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    
+    // Visualize
     visualizeTopoPaths(topo_paths);
     
-    ROS_INFO("[TopoPRM] Found %zu topological paths", topo_paths.size());
-    return true;
+    // Cleanup
+    clearGraph();
+    
+    return !topo_paths.empty();
 }
 
 // ============================================================================
@@ -71,7 +146,7 @@ bool TopoPRM::searchTopoPaths(const Vector3d& start, const Vector3d& goal,
 
 #if 1  // 🔧 LEGACY CODE RE-ENABLED as safety fallback (based on test1 analysis: TGK fails ~30%)
 
-vector<TopoPath> TopoPRM::findTopoPaths(const Vector3d& start, const Vector3d& goal) {
+vector<TopoPath> TopoPRM::findTopoPathsLegacy(const Vector3d& start, const Vector3d& goal) {
     vector<TopoPath> paths;
     
     ROS_INFO("[TopoPRM] ═══════════════════════════════════════");
@@ -166,8 +241,13 @@ vector<TopoPath> TopoPRM::findTopoPaths(const Vector3d& start, const Vector3d& g
         }
     }
     
-    ROS_INFO("[TopoPRM] Generated %d valid paths from %d attempts (%.1f%% success)", 
-             valid_paths, total_attempts, total_attempts > 0 ? 100.0*valid_paths/total_attempts : 0.0);
+    ROS_INFO("[TopoPRM] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    ROS_INFO("[TopoPRM] 📊 Generation Summary:");
+    ROS_INFO("[TopoPRM]   Total attempts: %d", total_attempts);
+    ROS_INFO("[TopoPRM]   Valid paths: %d", valid_paths);
+    ROS_INFO("[TopoPRM]   Success rate: %.1f%%", total_attempts > 0 ? 100.0*valid_paths/total_attempts : 0.0);
+    ROS_INFO("[TopoPRM]   🎯 Multi-path trigger: %s", valid_paths > 1 ? "✅ YES (MPPI will run!)" : "❌ NO (only 1 path)");
+    ROS_INFO("[TopoPRM] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     
     // If no paths found at all, try to generate a simple path with more points
     if (paths.empty()) {
@@ -493,15 +573,35 @@ vector<Vector3d> TopoPRM::generateTangentPoints(const Vector3d& start,
         perp_horizontal = Vector3d(1, 0, 0); // Fallback if vertical
     }
     
-    // Calculate avoidance radius (INCREASED for better clearance)
-    double avoidance_radius = search_radius_ * 1.5;  // 从1.2增加到1.5
+    // 🚀 AGGRESSIVE STRATEGY: 大幅增加安全距离
+    // 根据test1分析：动态估算+1m仍然导致100%碰撞
+    // 新策略：估算障碍物大小 + 3倍安全余量
+    double obstacle_actual_radius = estimateObstacleSize(obstacle_center);
     
-    // Generate 4 cardinal tangent points (left, right, up, down)
+    // ⚡ 激进安全余量：障碍物半径 + 3.0m (之前1.0m导致100%失败)
+    double safety_margin = 3.0;  // 3米激进安全余量
+    double avoidance_radius = obstacle_actual_radius + safety_margin;
+    
+    // ✅ 额外策略：如果估算半径太小，强制最小绕行距离
+    double min_avoidance = search_radius_ * 1.5;  // 最小7.5m (5.0 * 1.5)
+    avoidance_radius = std::max(avoidance_radius, min_avoidance);
+    
+    ROS_INFO("[TopoPRM]   🎯 Obstacle radius: %.2fm, safety: +%.2fm → avoidance: %.2fm", 
+              obstacle_actual_radius, safety_margin, avoidance_radius);
+    
+    // ✅ OPTIMIZATION: 8个方向，确保不同拓扑路径
+    // 核心思想：从障碍物不同侧通过 = 不同拓扑
+    Vector3d perp_vertical = start_to_goal.cross(perp_horizontal).normalized();
+    
     vector<Vector3d> directions = {
-        perp_horizontal,           // Left
-        -perp_horizontal,          // Right
-        Vector3d(0, 0, 1),        // Up
-        Vector3d(0, 0, -1)        // Down
+        perp_horizontal,                              // Left (0°)
+        -perp_horizontal,                             // Right (180°)
+        Vector3d(0, 0, 1),                           // Up (90° vertical)
+        Vector3d(0, 0, -1),                          // Down (-90° vertical)
+        (perp_horizontal + Vector3d(0,0,1)).normalized(),   // Left-Up (45°)
+        (-perp_horizontal + Vector3d(0,0,1)).normalized(),  // Right-Up (135°)
+        (perp_horizontal - Vector3d(0,0,1)).normalized(),   // Left-Down (-45°)
+        (-perp_horizontal - Vector3d(0,0,1)).normalized()   // Right-Down (-135°)
     };
     
     for (const auto& dir : directions) {
@@ -514,14 +614,15 @@ vector<Vector3d> TopoPRM::generateTangentPoints(const Vector3d& start,
             continue;
         }
         
-        // Validate: not too long (RELAXED from 1.8 to 2.5)
+        // Validate: not too long (放宽到3.5倍，之前2.0倍过严)
         double dist_to_start = (tangent_point - start).norm();
         double dist_to_goal = (tangent_point - goal).norm();
         double direct_dist = (goal - start).norm();
         
-        if (dist_to_start + dist_to_goal > direct_dist * 2.5) {  // 从1.8放宽到2.5
+        // ⚡ 激进放宽：3.5倍直线距离 (之前2.0倍导致很多路径被拒绝)
+        if (dist_to_start + dist_to_goal > direct_dist * 3.5) {
             ROS_DEBUG("[TopoPRM] Tangent point rejected: too long (%.2f vs %.2f)",
-                      dist_to_start + dist_to_goal, direct_dist * 2.5);
+                      dist_to_start + dist_to_goal, direct_dist * 3.5);
             continue;
         }
         
@@ -533,7 +634,375 @@ vector<Vector3d> TopoPRM::generateTangentPoints(const Vector3d& start,
     return tangent_points;
 }
 
+// 🚀 NEW FUNCTION: 动态估计障碍物实际大小
+// 通过8个方向采样，找到障碍物的实际边界
+double TopoPRM::estimateObstacleSize(const Vector3d& obstacle_center) {
+    double max_radius = 0.5;  // 最小假设半径：0.5米
+    
+    // 8个采样方向
+    vector<Vector3d> sample_directions = {
+        Vector3d(1, 0, 0),    // X+
+        Vector3d(-1, 0, 0),   // X-
+        Vector3d(0, 1, 0),    // Y+
+        Vector3d(0, -1, 0),   // Y-
+        Vector3d(0, 0, 1),    // Z+
+        Vector3d(0, 0, -1),   // Z-
+        Vector3d(0.707, 0.707, 0),   // XY对角线
+        Vector3d(-0.707, 0.707, 0)   // XY对角线
+    };
+    
+    for (const auto& dir : sample_directions) {
+        double radius = 0.0;
+        double step = 0.1;  // 10cm采样步长
+        
+        // 从中心向外扩展，直到离开障碍物
+        while (radius < search_radius_ * 2.0) {  // 最大搜索2倍search_radius
+            Vector3d sample_point = obstacle_center + dir * radius;
+            
+            if (!grid_map_->getInflateOccupancy(sample_point)) {
+                // 已经离开障碍物
+                break;
+            }
+            
+            radius += step;
+        }
+        
+        max_radius = std::max(max_radius, radius);
+    }
+    
+    ROS_DEBUG("[TopoPRM] Estimated obstacle size: %.2fm (center: [%.2f,%.2f,%.2f])", 
+              max_radius, obstacle_center.x(), obstacle_center.y(), obstacle_center.z());
+    
+    return max_radius;
+}
+
 #endif  // End of LEGACY CODE BLOCK - Re-enabled as safety fallback
+
+// ============================================================================
+// 🚀 FAST-PLANNER PRM IMPLEMENTATION (Week 1-4)
+// ============================================================================
+
+// ============================================================================
+// Week 1: 椭球自由空间采样
+// ============================================================================
+vector<Vector3d> TopoPRM::sampleFreeSpaceInEllipsoid(const Vector3d& start, 
+                                                     const Vector3d& goal, 
+                                                     int num_samples) {
+    vector<Vector3d> free_points;
+    
+    Vector3d center = 0.5 * (start + goal);
+    double semi_major_axis = 0.5 * (goal - start).norm() + sample_inflate_;
+    
+    // 构建椭球坐标系
+    Vector3d x_axis = (goal - start).normalized();
+    Vector3d z_axis(0, 0, 1);
+    Vector3d y_axis = x_axis.cross(z_axis).normalized();
+    if (y_axis.norm() < 1e-3) {
+        y_axis = Vector3d(1, 0, 0);
+    }
+    z_axis = x_axis.cross(y_axis).normalized();
+    
+    Matrix3d rotation;
+    rotation.col(0) = x_axis;
+    rotation.col(1) = y_axis;
+    rotation.col(2) = z_axis;
+    
+    // 随机采样
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> dis(0.0, 1.0);
+    
+    int valid_count = 0;
+    int attempts = 0;
+    int max_attempts = num_samples * 10;  // 最多尝试10倍
+    
+    while (valid_count < num_samples && attempts < max_attempts) {
+        attempts++;
+        
+        // 在椭球内均匀采样
+        double theta = 2.0 * M_PI * dis(gen);
+        double phi = acos(2.0 * dis(gen) - 1.0);
+        double r = pow(dis(gen), 1.0/3.0) * semi_major_axis;
+        
+        Vector3d pt_local(
+            r * sin(phi) * cos(theta),
+            r * sin(phi) * sin(theta),
+            r * cos(phi)
+        );
+        
+        Vector3d pt_world = rotation * pt_local + center;
+        
+        // 检查是否在自由空间
+        if (isPointFree(pt_world, clearance_)) {
+            free_points.push_back(pt_world);
+            valid_count++;
+        }
+    }
+    
+    ROS_DEBUG("[TopoPRM] 椭球采样: %d 次尝试, %d 个有效点", attempts, valid_count);
+    
+    return free_points;
+}
+
+bool TopoPRM::isPointFree(const Vector3d& pt, double min_clearance) {
+    // 检查是否在地图范围内
+    if (!grid_map_->isInMap(pt)) {
+        return false;
+    }
+    
+    // 检查距离障碍物的距离
+    double dist = grid_map_->getDistance(pt);
+    return dist > min_clearance;
+}
+
+// ============================================================================
+// Week 2: 可见性图构建
+// ============================================================================
+void TopoPRM::buildVisibilityGraph(const Vector3d& start, const Vector3d& goal,
+                                   const vector<Vector3d>& sample_points) {
+    clearGraph();
+    
+    // 创建起点和终点节点
+    GraphNode* start_node = new GraphNode(start, 0);
+    GraphNode* goal_node = new GraphNode(goal, 1);
+    graph_nodes_.push_back(start_node);
+    graph_nodes_.push_back(goal_node);
+    
+    // 创建采样点节点
+    int node_id = 2;
+    for (const auto& pt : sample_points) {
+        GraphNode* node = new GraphNode(pt, node_id++);
+        graph_nodes_.push_back(node);
+    }
+    
+    // 构建可见性连接
+    int edge_count = 0;
+    for (size_t i = 0; i < graph_nodes_.size(); ++i) {
+        for (size_t j = i + 1; j < graph_nodes_.size(); ++j) {
+            Vector3d p1 = graph_nodes_[i]->pos;
+            Vector3d p2 = graph_nodes_[j]->pos;
+            
+            // 限制搜索半径，避免过长连接
+            if ((p2 - p1).norm() > search_radius_ * 2.0) {
+                continue;
+            }
+            
+            // 检查可见性
+            if (isLineCollisionFree(p1, p2)) {
+                graph_nodes_[i]->neighbors.push_back(graph_nodes_[j]);
+                graph_nodes_[j]->neighbors.push_back(graph_nodes_[i]);
+                edge_count++;
+            }
+        }
+    }
+    
+    ROS_DEBUG("[TopoPRM] 可见性图: %zu 节点, %d 条边", graph_nodes_.size(), edge_count);
+}
+
+// ============================================================================
+// Week 3: DFS多路径搜索
+// ============================================================================
+vector<vector<Vector3d>> TopoPRM::searchMultiplePaths(GraphNode* start_node, 
+                                                      GraphNode* goal_node) {
+    raw_paths_.clear();
+    
+    vector<GraphNode*> visited;
+    visited.push_back(start_node);
+    
+    depthFirstSearch(visited, goal_node);
+    
+    // 转换为Vector3d路径
+    vector<vector<Vector3d>> result_paths;
+    for (const auto& node_path : raw_paths_) {
+        result_paths.push_back(node_path);
+    }
+    
+    ROS_DEBUG("[TopoPRM] DFS找到 %zu 条原始路径", result_paths.size());
+    
+    return result_paths;
+}
+
+void TopoPRM::depthFirstSearch(vector<GraphNode*>& visited, GraphNode* goal_node) {
+    GraphNode* current = visited.back();
+    
+    // 到达终点
+    if (current->id == goal_node->id) {
+        vector<Vector3d> path;
+        for (auto node : visited) {
+            path.push_back(node->pos);
+        }
+        raw_paths_.push_back(path);
+        
+        // 限制路径数量
+        if (raw_paths_.size() >= (size_t)max_raw_paths_) {
+            return;
+        }
+        return;
+    }
+    
+    // 递归搜索邻居
+    for (auto neighbor : current->neighbors) {
+        // 检查是否已访问
+        bool already_visited = false;
+        for (auto v : visited) {
+            if (v->id == neighbor->id) {
+                already_visited = true;
+                break;
+            }
+        }
+        
+        if (already_visited) continue;
+        
+        // 深度限制 (防止过长路径)
+        if (visited.size() > 20) continue;
+        
+        // 递归
+        visited.push_back(neighbor);
+        depthFirstSearch(visited, goal_node);
+        
+        if (raw_paths_.size() >= (size_t)max_raw_paths_) {
+            return;
+        }
+        
+        visited.pop_back();
+    }
+}
+
+// ============================================================================
+// Week 4: 拓扑等价性去重
+// ============================================================================
+vector<vector<Vector3d>> TopoPRM::pruneEquivalentPaths(
+    const vector<vector<Vector3d>>& paths) {
+    
+    if (paths.empty()) return paths;
+    
+    vector<vector<Vector3d>> unique_paths;
+    unique_paths.push_back(paths[0]);
+    
+    for (size_t i = 1; i < paths.size(); ++i) {
+        bool is_unique = true;
+        
+        for (const auto& existing : unique_paths) {
+            if (sameTopoPath(paths[i], existing)) {
+                is_unique = false;
+                break;
+            }
+        }
+        
+        if (is_unique) {
+            unique_paths.push_back(paths[i]);
+        }
+    }
+    
+    ROS_DEBUG("[TopoPRM] 拓扑去重: %zu → %zu 路径", paths.size(), unique_paths.size());
+    
+    return unique_paths;
+}
+
+bool TopoPRM::sameTopoPath(const vector<Vector3d>& path1, 
+                           const vector<Vector3d>& path2) {
+    // 离散化为相同点数
+    vector<Vector3d> pts1 = discretizePath(path1, discretize_points_num_);
+    vector<Vector3d> pts2 = discretizePath(path2, discretize_points_num_);
+    
+    // 检查对应点之间是否可见
+    for (int i = 0; i < discretize_points_num_; ++i) {
+        if (!isLineCollisionFree(pts1[i], pts2[i])) {
+            return false;  // 不同拓扑类
+        }
+    }
+    
+    return true;  // 相同拓扑类
+}
+
+vector<Vector3d> TopoPRM::discretizePath(const vector<Vector3d>& path, int pt_num) {
+    if (path.size() < 2) return path;
+    
+    // 计算路径长度
+    vector<double> lengths;
+    lengths.push_back(0.0);
+    for (size_t i = 0; i < path.size() - 1; ++i) {
+        double len = (path[i+1] - path[i]).norm();
+        lengths.push_back(lengths.back() + len);
+    }
+    double total_length = lengths.back();
+    
+    // 均匀采样
+    vector<Vector3d> discretized;
+    for (int i = 0; i < pt_num; ++i) {
+        double target_len = total_length * i / (pt_num - 1);
+        
+        // 找到对应的段
+        size_t seg_idx = 0;
+        for (size_t j = 0; j < lengths.size() - 1; ++j) {
+            if (target_len >= lengths[j] && target_len <= lengths[j+1]) {
+                seg_idx = j;
+                break;
+            }
+        }
+        
+        // 插值
+        double lambda = (target_len - lengths[seg_idx]) / 
+                       (lengths[seg_idx+1] - lengths[seg_idx]);
+        Vector3d pt = (1 - lambda) * path[seg_idx] + lambda * path[seg_idx+1];
+        discretized.push_back(pt);
+    }
+    
+    return discretized;
+}
+
+// ============================================================================
+// 辅助函数: 路径选择
+// ============================================================================
+vector<vector<Vector3d>> TopoPRM::selectShortPaths(
+    const vector<vector<Vector3d>>& paths) {
+    
+    if (paths.empty()) return paths;
+    
+    vector<vector<Vector3d>> short_paths;
+    
+    // 找到最短路径
+    int shortest_idx = shortestPathIndex(paths);
+    double min_length = pathLength(paths[shortest_idx]);
+    
+    // 选择长度在阈值内的路径
+    for (const auto& path : paths) {
+        double len = pathLength(path);
+        if (len < min_length * ratio_to_short_ && short_paths.size() < (size_t)reserve_num_) {
+            short_paths.push_back(path);
+        }
+    }
+    
+    // 如果太少，至少保留最短的
+    if (short_paths.empty()) {
+        short_paths.push_back(paths[shortest_idx]);
+    }
+    
+    return short_paths;
+}
+
+int TopoPRM::shortestPathIndex(const vector<vector<Vector3d>>& paths) {
+    int shortest_idx = 0;
+    double min_length = std::numeric_limits<double>::max();
+    
+    for (size_t i = 0; i < paths.size(); ++i) {
+        double len = pathLength(paths[i]);
+        if (len < min_length) {
+            min_length = len;
+            shortest_idx = i;
+        }
+    }
+    
+    return shortest_idx;
+}
+
+double TopoPRM::pathLength(const vector<Vector3d>& path) {
+    double length = 0.0;
+    for (size_t i = 0; i < path.size() - 1; ++i) {
+        length += (path[i+1] - path[i]).norm();
+    }
+    return length;
+}
 
 // ============================================================================
 // NOTE: Shared utility functions (isPathValid, calculatePathCost, etc.) 

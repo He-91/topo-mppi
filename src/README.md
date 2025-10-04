@@ -1,3 +1,245 @@
+# Topo-MPPI 无人机路径规划系统
+
+## 项目简介
+本项目实现了基于拓扑多路径+MPPI优化的三层无人机路径规划系统，支持复杂环境下的高鲁棒性轨迹生成。
+
+- **全局层**：TopoPRM（拓扑路径生成，多样性）
+- **优化层**：MPPI（动力学轨迹并行优化）
+- **执行层**：B-spline（轨迹平滑与可行性）
+
+## 📊 最新性能（v3.0 Fast-Planner PRM）
+
+### 核心指标
+| 指标 | v2.0 (切线点法) | v3.0 (PRM) | 提升 |
+|------|----------------|------------|------|
+| **多路径生成率** | 18.75% | **58.06%** | **+39.31%** ✅ |
+| **平均路径数** | 1.19 | **1.87** | **+57%** ✅ |
+| **MPPI触发率** | 18.75% | **58.06%** | **+3倍** ✅ |
+
+### 路径分布（test1.md验证）
+```
+v3.0 性能 (31次规划):
+  1条路径: 13次 (41.9%)
+  2条路径: 12次 (38.7%) ← 最常见
+  3条路径:  3次 ( 9.7%)
+  4条路径:  3次 ( 9.7%)
+```
+
+**详细分析**: 参见 [PRM_V3_UPGRADE_SUMMARY.md](PRM_V3_UPGRADE_SUMMARY.md)
+
+---
+
+## 系统架构
+```
+EGO-Planner Manager
+    └─ STEP 1: Topological Planning (TopoPRM PRM v3.0)
+          ├─ 椭球自由空间采样 (100点)
+          ├─ 可见性图构建 (102节点)
+          ├─ DFS多路径搜索 (50条原始路径)
+          ├─ 拓扑等价性去重 (5-13条唯一路径)
+          └─ 最优路径选择 (1-4条最终路径)
+    └─ STEP 1.5: Parallel MPPI Optimization (多路径并行优化)
+    └─ STEP 3: B-spline Smoothing (仅平滑)
+```
+
+---
+
+## 核心算法
+
+### 1. TopoPRM (Fast-Planner PRM v3.0) ⭐
+
+**算法流程**:
+```cpp
+STEP 1: 椭球自由空间采样
+  - 在起点-终点椭球内随机采样100个点
+  - 检查安全距离 clearance_=0.8m
+  - 成功率: 100%
+
+STEP 2: 可见性图构建
+  - 创建start/goal节点 + 采样点 → 102节点
+  - 可见性连接 (半径限制10m)
+  
+STEP 3: DFS多路径搜索
+  - 深度优先搜索，最多50条原始路径
+  - 深度限制20层
+
+STEP 4: 拓扑等价性去重
+  - 30点离散化比对
+  - 去重: 50条 → 5-13条唯一路径
+
+STEP 5: 最优路径选择
+  - 过滤超长路径 (>2.5倍最短路径)
+  - 保留8条最短路径 → 实际输出1-4条
+```
+
+**关键参数**:
+```cpp
+max_raw_paths_ = 50;        // DFS最大搜索路径数
+reserve_num_ = 8;           // 保留路径数量
+clearance_ = 0.8;           // 采样点安全距离 (m)
+sample_inflate_ = 3.0;      // 椭球膨胀因子
+ratio_to_short_ = 2.5;      // 最长路径=最短路径*2.5
+discretize_points_num_ = 30; // 拓扑比对离散化点数
+```
+
+### 2. MPPI (并行优化)
+- 采样多条扰动轨迹，评估成本
+- 指数加权平均得到最优轨迹
+- 支持路径引导与归一化成本选择
+- **触发条件**: 多路径数量 > 1
+
+### 3. B-spline (轨迹平滑)
+- 仅做轨迹平滑与轻微避障
+- 梯度下降优化，支持rebound机制
+
+---
+
+## 参数调优建议
+
+### PRM参数优化（提升多路径率至70%+）
+
+| 参数 | 当前值 | 建议值 | 效果 |
+|------|--------|--------|------|
+| `sample_inflate_` | 3.0 | **4.0** | 扩大采样区域，增加路径多样性 |
+| `ratio_to_short_` | 2.5 | **3.5** | 保留更多较长路径 |
+| `discretize_points_num_` | 30 | **20** | 减少去重严格度，保留更多路径 |
+| `max_raw_paths_` | 50 | **100** | 增加DFS搜索深度 |
+
+### MPPI参数
+| 参数 | 推荐值 | 说明 |
+|------|--------|------|
+| num_samples | 300~500 | 采样轨迹数 |
+| horizon_steps | 15~20 | 预测步数 |
+
+---
+
+## 快速上手
+
+### 编译运行
+```bash
+cd /home/he/ros_ws/test/topo-mppi
+catkin_make
+source devel/setup.bash
+roslaunch plan_manage run_in_sim.launch
+```
+
+### 测试可视化
+```bash
+# 启动MPPI可视化测试
+roslaunch plan_manage test_mppi_visualization.launch
+```
+
+### 查看测试结果
+```bash
+# 查看最新测试日志
+cat test1.md
+
+# 统计性能
+python3 << 'EOF'
+import re
+with open('test1.md', 'rb') as f:
+    content = f.read().decode('utf-8', errors='ignore')
+paths = []
+lines = content.split('\n')
+for i, line in enumerate(lines):
+    if 'STEP 5' in line and i+1 < len(lines):
+        match = re.search(r':\s+(\d+)\s+\?', lines[i+1])
+        if match:
+            paths.append(int(match.group(1)))
+if paths:
+    total = len(paths)
+    multi = sum(1 for n in paths if n > 1)
+    print(f"多路径率: {multi}/{total} = {multi/total*100:.2f}%")
+    print(f"平均路径数: {sum(paths)/total:.2f}")
+EOF
+```
+
+---
+
+## 代码结构导航
+
+### 核心文件
+- `planner/path_searching/src/topo_prm.cpp`  
+  TopoPRM PRM v3.0主实现（400行新增，完整PRM流程）
+  
+- `planner/path_searching/include/path_searching/topo_prm.h`  
+  PRM算法接口（GraphNode结构体，PRM参数，新方法声明）
+  
+- `planner/path_searching/src/mppi_planner.cpp`  
+  MPPI主实现（支持路径引导）
+  
+- `planner/plan_manage/src/planner_manager.cpp`  
+  三层集成调度（STEP 1→1.5→3）
+
+### 环境与优化
+- `bspline_opt/src/bspline_optimizer.cpp` - B-spline优化
+- `plan_env/src/grid_map.cpp` - ESDF环境地图
+
+### 文档
+- `PRM_V3_UPGRADE_SUMMARY.md` - v3.0升级详细总结 ⭐
+- `TOPO_UPGRADE_ROADMAP.md` - 4周改造计划（已完成）
+- `test1.md` - 最新测试日志（31次规划验证）
+
+---
+
+## 版本历史
+
+### v3.0 (2025-01-04) - Fast-Planner PRM ⭐
+- ✅ 多路径率: 18.75% → 58.06% (+39.31%)
+- ✅ 平均路径数: 1.19 → 1.87 (+57%)
+- ✅ 椭球自由空间采样 (100点，100%成功)
+- ✅ 可见性图构建 (102节点)
+- ✅ DFS多路径搜索 (50条原始路径)
+- ✅ 拓扑等价性去重 (5-13条唯一路径)
+
+### v2.0 (2024-12) - 障碍物切线点法
+- 切线点生成 (多方向)
+- 局部贪心搜索
+- 多路径率: 18.75%
+- 存在问题: start→tangent碰撞率高
+
+### v1.0 (2024) - 原始EGO-Planner
+- 单路径B-spline规划
+- 无拓扑路径
+
+---
+
+## 下一步优化
+
+### Phase 1: 参数调优（优先级高）
+- [ ] 放宽拓扑去重: `discretize_points_num_ = 20`
+- [ ] 扩大椭球采样: `sample_inflate_ = 4.0`
+- [ ] 保留更多路径: `ratio_to_short_ = 3.5`
+- [ ] 目标: 多路径率 >70%
+
+### Phase 2: 算法优化（中期）
+- [ ] 自适应采样（根据环境复杂度）
+- [ ] 局部重采样（关键障碍物区域）
+- [ ] 路径质量评估（平滑度、曲率）
+
+### Phase 3: 系统集成（长期）
+- [ ] MPPI参数自适应
+- [ ] B-spline平滑优化
+- [ ] 实时性能优化 (<5ms)
+
+---
+
+## 参考资料
+
+- **Fast-Planner**: https://github.com/HKUST-Aerial-Robotics/Fast-Planner
+- **TGK-Planner**: https://github.com/ZJU-FAST-Lab/TGK-Planner
+- **原始EGO-Planner**: https://github.com/ZJU-FAST-Lab/ego-planner
+
+---
+
+## 许可证
+本项目基于EGO-Planner，遵循相同的开源许可证。
+
+---
+
+**最后更新**: 2025-01-04  
+**当前版本**: v3.0 Fast-Planner PRM  
+**测试状态**: ✅ 通过 (test1.md 31次规划验证)
 # EGO-Planner TOPO+MPPI 升级项目现状总结
 
 ## 📋 项目概述

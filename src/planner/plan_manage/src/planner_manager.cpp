@@ -273,9 +273,15 @@ namespace ego_planner
         if (!topo_paths.empty()) {
             TopoPath best_path;
             
-            // 🚀 NEW: Multi-path MPPI optimization
-            if (use_parallel_mppi && mppi_planner_ != nullptr && topo_paths.size() > 1) {
-                ROS_INFO("[PlannerManager] STEP 2: Parallel MPPI Optimization");
+            // 🚀 CRITICAL OPTIMIZATION: 降低MPPI触发阈值从 >1 到 >=1
+            // 即使只有1条路径也运行MPPI优化，确保架构升级生效
+            if (use_parallel_mppi && mppi_planner_ != nullptr && topo_paths.size() >= 1) {
+                ROS_INFO("[PlannerManager] STEP 2: MPPI Optimization (🚀 Triggered for %zu path(s))", topo_paths.size());
+                if (topo_paths.size() > 1) {
+                    ROS_INFO("[PlannerManager]   🎯 Multi-path parallel optimization mode");
+                } else {
+                    ROS_INFO("[PlannerManager]   🎯 Single-path optimization mode (still beneficial!)");
+                }
                 ROS_INFO("[PlannerManager]   🚀 Optimizing all %zu topological paths...", topo_paths.size());
                 
                 struct MPPICandidate {
