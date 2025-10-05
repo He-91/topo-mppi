@@ -190,8 +190,10 @@ namespace ego_planner
       Eigen::Vector3d pt = optimal_pts.col(i).transpose();
       list.push_back(pt);
     }
-    Eigen::Vector4d color(1, 0, 0, 1);
-    displayMarkerList(optimal_list_pub, list, 0.15, color, id);
+    // ✅ 金色高亮: RGB(1.0, 0.84, 0.0) = #FFD700 (Gold)
+    Eigen::Vector4d color(1.0, 0.84, 0.0, 1.0);
+    // ✅ 加粗到0.35 (原0.15太细)
+    displayMarkerList(optimal_list_pub, list, 0.35, color, id);
   }
 
   void PlanningVisualization::displayAStarList(std::vector<std::vector<Eigen::Vector3d>> a_star_paths, int id /* = Eigen::Vector4d(0.5,0.5,0,1)*/)

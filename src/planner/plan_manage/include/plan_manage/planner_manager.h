@@ -17,22 +17,23 @@
 namespace ego_planner
 {
 
-  // 🎨 Unified color scheme for TOPO paths and their corresponding MPPI trajectories
+  // 🎨 RAINBOW COLOR SCHEME: 统一的彩虹色谱 for TOPO paths和MPPI trajectories
+  // 与topo_prm.cpp中的可视化颜色完全一致，确保MPPI优化后的路径与原Topo路径颜色对应
   struct PathColor {
     double r, g, b;
   };
 
   const PathColor TOPO_COLORS[10] = {
-    {1.0, 0.0, 0.0},  // #0: Red
-    {0.0, 1.0, 0.0},  // #1: Green  
-    {0.0, 0.0, 1.0},  // #2: Blue
-    {1.0, 0.5, 0.0},  // #3: Orange
-    {1.0, 0.0, 1.0},  // #4: Magenta
-    {0.0, 1.0, 1.0},  // #5: Cyan
-    {0.5, 0.0, 0.5},  // #6: Purple
-    {1.0, 1.0, 0.0},  // #7: Yellow
-    {0.0, 0.5, 0.5},  // #8: Dark Cyan
-    {0.5, 0.5, 0.5},  // #9: Gray
+    {1.0, 0.0, 0.0},      // #0: 红色 Red
+    {1.0, 0.65, 0.0},     // #1: 橙色 Orange
+    {1.0, 1.0, 0.0},      // #2: 黄色 Yellow
+    {0.0, 1.0, 0.0},      // #3: 绿色 Green
+    {0.0, 1.0, 1.0},      // #4: 青色 Cyan
+    {0.0, 0.0, 1.0},      // #5: 蓝色 Blue
+    {0.5, 0.0, 1.0},      // #6: 紫色 Purple
+    {1.0, 0.0, 1.0},      // #7: 品红 Magenta
+    {1.0, 0.5, 0.5},      // #8: 粉色 Pink
+    {0.5, 1.0, 0.5},      // #9: 浅绿 Light Green
   };
 
   // Fast Planner Manager

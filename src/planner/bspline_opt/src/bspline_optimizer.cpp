@@ -882,12 +882,10 @@ namespace ego_planner
     bool flag_force_return, flag_occ, success;
     new_lambda2_ = lambda2_;
     constexpr int MAX_RESART_NUMS_SET = 3;
-
-  // Re-enable rebound loop: allow a few restart/rebound attempts (capped)
-  // so B-spline can try to escape infeasible local minima instead of silently failing.
-  const int MAX_RESTARTS = MAX_RESART_NUMS_SET; // keep original constant
-  while (restart_nums < MAX_RESTARTS && !success)
-  {
+    
+    // ✅ 恢复原始ego-planner的do-while循环逻辑（支持最多20次rebound）
+    do
+    {
       /* ---------- prepare ---------- */
       min_cost_ = std::numeric_limits<double>::max();
       iter_num_ = 0;
@@ -961,18 +959,10 @@ namespace ego_planner
       }
       else if (result == lbfgs::LBFGSERR_CANCELED)
       {
-        // LBFGS signalled a cancel (likely due to earlyExit or infeasible region).
-        // Attempt a rebound: re-initialize control points, increase collision penalty and retry.
+        // ✅ 恢复原始逻辑：允许rebound重试（最多20次）
+        flag_force_return = true;
         rebound_times++;
-        flag_force_return = false; // allow retries
-        ROS_WARN("[B-spline] LBFGS canceled -> attempting rebound/restart (#%d)", rebound_times);
-        // Re-init control points using current cps as a seed and increase collision weight
-        initControlPoints(cps_.points, false);
-        new_lambda2_ *= 2.0; // increase collision penalty to encourage feasibility
-        // Log the non-smoothing action explicitly so operator knows
-        ROS_WARN("[B-spline] Non-smoothing action: rebound/restart performed (new_lambda2=%.3f)", new_lambda2_);
-        // continue loop to retry optimization
-        continue;
+        cout << "iter=" << iter_num_ << ",time(ms)=" << time_ms << ",rebound." << endl;
       }
       else
       {
@@ -980,7 +970,8 @@ namespace ego_planner
         // while (ros::ok());
       }
 
-  }
+    } while ((flag_occ && restart_nums < MAX_RESART_NUMS_SET) ||
+             (flag_force_return && force_stop_type_ == STOP_FOR_REBOUND && rebound_times <= 20));
 
     return success;
   }
@@ -1000,14 +991,14 @@ namespace ego_planner
     double origin_lambda4 = lambda4_;
     bool flag_safe = true;
     int iter_count = 0;
-
-    // Disable refine loop - only do one optimization pass for smoothing only
-    // If refine adjustments are attempted, log it as per user requirement
+    
+    // ✅ 恢复原始ego-planner的refine循环逻辑
     do
     {
       lbfgs::lbfgs_parameter_t lbfgs_params;
       lbfgs::lbfgs_load_default_parameters(&lbfgs_params);
       lbfgs_params.mem_size = 16;
+      lbfgs_params.max_iterations = 200;
       lbfgs_params.g_epsilon = 0.001;
 
       int result = lbfgs::lbfgs_optimize(variable_num_, q, &final_cost, BsplineOptimizer::costFunctionRefine, NULL, NULL, this, &lbfgs_params);
@@ -1033,7 +1024,13 @@ namespace ego_planner
         {
           // cout << "Refined traj hit_obs, t=" << t << " P=" << traj.evaluateDeBoorT(t).transpose() << endl;
 
-          ROS_WARN("[B-spline] Refine adjustment attempted but disabled - B-spline is now smoothing-only!");
+          // ✅ 恢复原始的ref_pts重新初始化逻辑
+          Eigen::MatrixXd ref_pts(ref_pts_.size(), 3);
+          for (size_t i = 0; i < ref_pts_.size(); i++)
+          {
+            ref_pts.row(i) = ref_pts_[i].transpose();
+          }
+
           flag_safe = false;
           break;
         }
@@ -1043,7 +1040,7 @@ namespace ego_planner
         lambda4_ *= 2;
 
       iter_count++;
-    } while (false); // Disabled refine loop - only one pass for smoothing
+    } while (!flag_safe && iter_count <= 0);
 
     lambda4_ = origin_lambda4;
 

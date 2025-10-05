@@ -58,6 +58,11 @@ private:
     std::vector<GraphNode*> graph_nodes_;
     std::vector<std::vector<Eigen::Vector3d>> raw_paths_;
     
+    // 🚀 P0 NEW: DFS超时控制
+    std::chrono::steady_clock::time_point dfs_start_time_;
+    bool dfs_timeout_flag_;
+    const double MAX_DFS_TIME_MS = 200.0;  // ✅ UPGRADED: 200ms超时(K=28图复杂度增加,需更多搜索时间)
+    
     // Shared utility functions
     bool isPathValid(const std::vector<Eigen::Vector3d>& path);
     bool isLineCollisionFree(const Eigen::Vector3d& start, const Eigen::Vector3d& end);
@@ -65,6 +70,9 @@ private:
     // 🚀 NEW: Fast-Planner PRM methods
     // Week 1: 椭球采样
     std::vector<Eigen::Vector3d> sampleFreeSpaceInEllipsoid(
+        const Eigen::Vector3d& start, const Eigen::Vector3d& goal, int num_samples);
+    // 🚀 P0 NEW: 边界层采样
+    std::vector<Eigen::Vector3d> sampleBoundaryLayer(
         const Eigen::Vector3d& start, const Eigen::Vector3d& goal, int num_samples);
     bool isPointFree(const Eigen::Vector3d& pt, double min_clearance);
     
