@@ -1,0 +1,708 @@
+{
+  "total_blocks": 11,
+  "total_paths": 75,
+  "outliers": 0,
+  "blocks": [
+    {
+      "start": [
+        1.35,
+        14.53,
+        1.21
+      ],
+      "goal": [
+        6.28,
+        8.84,
+        1.03
+      ],
+      "paths": [
+        {
+          "length_m": 8.65,
+          "log_line": "[INFO] [1759618716.576272593]: [PlannerManager]   Path 1: MPPI ??? cost=4442.947, norm_cost=513.902, length=8.65m",
+          "idx": 159,
+          "ratio": 1.1486117781551073,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.88,
+          "log_line": "[INFO] [1759618716.579191836]: [PlannerManager]   Path 2: MPPI ??? cost=3158.398, norm_cost=400.825, length=7.88m",
+          "idx": 162,
+          "ratio": 1.046365411775982,
+          "is_outlier": false
+        },
+        {
+          "length_m": 8.36,
+          "log_line": "[INFO] [1759618716.582042961]: [PlannerManager]   Path 3: MPPI ??? cost=3077.482, norm_cost=368.015, length=8.36m",
+          "idx": 165,
+          "ratio": 1.1101034064019302,
+          "is_outlier": false
+        },
+        {
+          "length_m": 5.73,
+          "log_line": "[INFO] [1759618716.584880671]: [PlannerManager]   Path 4: MPPI ??? cost=3287.660, norm_cost=574.153, length=5.73m",
+          "idx": 168,
+          "ratio": 0.760872310847256,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.2,
+          "log_line": "[INFO] [1759618716.587712240]: [PlannerManager]   Path 5: MPPI ??? cost=3985.848, norm_cost=643.351, length=6.20m",
+          "idx": 171,
+          "ratio": 0.8232824305851636,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.78,
+          "log_line": "[INFO] [1759618716.590538689]: [PlannerManager]   Path 6: MPPI ??? cost=4252.944, norm_cost=627.457, length=6.78m",
+          "idx": 174,
+          "ratio": 0.9002991740915176,
+          "is_outlier": false
+        }
+      ],
+      "lines_idx": 26,
+      "straight_m": 7.530829967540098
+    },
+    {
+      "start": [
+        1.59,
+        13.04,
+        1.39
+      ],
+      "goal": [
+        7.26,
+        7.76,
+        1.01
+      ],
+      "paths": [
+        {
+          "length_m": 6.2,
+          "log_line": "[INFO] [1759618717.752067362]: [PlannerManager]   Path 1: MPPI ??? cost=2814.222, norm_cost=453.887, length=6.20m",
+          "idx": 330,
+          "ratio": 0.7992737476971493,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.7,
+          "log_line": "[INFO] [1759618717.754835582]: [PlannerManager]   Path 2: MPPI ??? cost=2296.056, norm_cost=342.763, length=6.70m",
+          "idx": 333,
+          "ratio": 0.8637313079953065,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.76,
+          "log_line": "[INFO] [1759618717.757554980]: [PlannerManager]   Path 3: MPPI ??? cost=2011.794, norm_cost=259.284, length=7.76m",
+          "idx": 336,
+          "ratio": 1.0003813358273999,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.11,
+          "log_line": "[INFO] [1759618717.760282133]: [PlannerManager]   Path 4: MPPI ??? cost=2286.939, norm_cost=321.725, length=7.11m",
+          "idx": 339,
+          "ratio": 0.9165865074397954,
+          "is_outlier": false
+        },
+        {
+          "length_m": 5.91,
+          "log_line": "[INFO] [1759618717.762973469]: [PlannerManager]   Path 5: MPPI ??? cost=2700.971, norm_cost=456.729, length=5.91m",
+          "idx": 342,
+          "ratio": 0.7618883627242181,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.42,
+          "log_line": "[INFO] [1759618717.765665816]: [PlannerManager]   Path 6: MPPI ??? cost=2859.518, norm_cost=445.753, length=6.42m",
+          "idx": 345,
+          "ratio": 0.8276350742283385,
+          "is_outlier": false
+        },
+        {
+          "length_m": 8.24,
+          "log_line": "[INFO] [1759618717.768350740]: [PlannerManager]   Path 7: MPPI ??? cost=2310.431, norm_cost=280.295, length=8.24m",
+          "idx": 348,
+          "ratio": 1.0622605937136307,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.79,
+          "log_line": "[INFO] [1759618717.771060490]: [PlannerManager]   Path 8: MPPI ??? cost=2071.798, norm_cost=305.041, length=6.79m",
+          "idx": 351,
+          "ratio": 0.8753336688489748,
+          "is_outlier": false
+        }
+      ],
+      "lines_idx": 197,
+      "straight_m": 7.7570419619852515
+    },
+    {
+      "start": [
+        1.58,
+        12.59,
+        1.37
+      ],
+      "goal": [
+        7.6,
+        7.4,
+        1.0
+      ],
+      "paths": [
+        {
+          "length_m": 6.0,
+          "log_line": "[INFO] [1759618718.151119083]: [PlannerManager]   Path 1: MPPI ??? cost=3783.133, norm_cost=630.374, length=6.00m",
+          "idx": 505,
+          "ratio": 0.7540557088198312,
+          "is_outlier": false
+        },
+        {
+          "length_m": 5.95,
+          "log_line": "[INFO] [1759618718.154015363]: [PlannerManager]   Path 2: MPPI ??? cost=3755.702, norm_cost=631.177, length=5.95m",
+          "idx": 508,
+          "ratio": 0.7477719112463327,
+          "is_outlier": false
+        },
+        {
+          "length_m": 5.84,
+          "log_line": "[INFO] [1759618718.156879393]: [PlannerManager]   Path 3: MPPI ??? cost=3909.346, norm_cost=669.594, length=5.84m",
+          "idx": 511,
+          "ratio": 0.7339475565846357,
+          "is_outlier": false
+        },
+        {
+          "length_m": 5.25,
+          "log_line": "[INFO] [1759618718.159723685]: [PlannerManager]   Path 4: MPPI ??? cost=4578.152, norm_cost=871.884, length=5.25m",
+          "idx": 514,
+          "ratio": 0.6597987452173524,
+          "is_outlier": false
+        },
+        {
+          "length_m": 5.94,
+          "log_line": "[INFO] [1759618718.162557498]: [PlannerManager]   Path 5: MPPI ??? cost=3752.795, norm_cost=631.758, length=5.94m",
+          "idx": 517,
+          "ratio": 0.746515151731633,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.11,
+          "log_line": "[INFO] [1759618718.165415667]: [PlannerManager]   Path 6: MPPI ??? cost=3383.165, norm_cost=554.091, length=6.11m",
+          "idx": 520,
+          "ratio": 0.7678800634815282,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.07,
+          "log_line": "[INFO] [1759618718.168296908]: [PlannerManager]   Path 7: MPPI ??? cost=4588.099, norm_cost=648.551, length=7.07m",
+          "idx": 523,
+          "ratio": 0.8885289768927012,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.16,
+          "log_line": "[INFO] [1759618718.171156670]: [PlannerManager]   Path 8: MPPI ??? cost=4237.232, norm_cost=591.641, length=7.16m",
+          "idx": 526,
+          "ratio": 0.8998398125249987,
+          "is_outlier": false
+        }
+      ],
+      "lines_idx": 372,
+      "straight_m": 7.956971785798916
+    },
+    {
+      "start": [
+        2.4,
+        11.75,
+        1.54
+      ],
+      "goal": [
+        8.3,
+        6.7,
+        0.98
+      ],
+      "paths": [
+        {
+          "length_m": 6.46,
+          "log_line": "[INFO] [1759618718.929553921]: [PlannerManager]   Path 1: MPPI ??? cost=1845.219, norm_cost=285.733, length=6.46m",
+          "idx": 682,
+          "ratio": 0.829664871573348,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.37,
+          "log_line": "[INFO] [1759618718.932439591]: [PlannerManager]   Path 2: MPPI ??? cost=2220.647, norm_cost=301.189, length=7.37m",
+          "idx": 685,
+          "ratio": 0.9465371677237733,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.55,
+          "log_line": "[INFO] [1759618718.935278023]: [PlannerManager]   Path 3: MPPI ??? cost=2464.536, norm_cost=326.338, length=7.55m",
+          "idx": 688,
+          "ratio": 0.9696547647645166,
+          "is_outlier": false
+        },
+        {
+          "length_m": 5.31,
+          "log_line": "[INFO] [1759618718.938192777]: [PlannerManager]   Path 4: MPPI ??? cost=2004.071, norm_cost=377.298, length=5.31m",
+          "idx": 691,
+          "ratio": 0.6819691127019315,
+          "is_outlier": false
+        },
+        {
+          "length_m": 8.56,
+          "log_line": "[INFO] [1759618718.941059031]: [PlannerManager]   Path 5: MPPI ??? cost=1865.407, norm_cost=217.801, length=8.56m",
+          "idx": 694,
+          "ratio": 1.0993701703820216,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.21,
+          "log_line": "[INFO] [1759618718.943939782]: [PlannerManager]   Path 6: MPPI ??? cost=2262.623, norm_cost=313.631, length=7.21m",
+          "idx": 697,
+          "ratio": 0.9259881925764457,
+          "is_outlier": false
+        },
+        {
+          "length_m": 8.0,
+          "log_line": "[INFO] [1759618718.946790707]: [PlannerManager]   Path 7: MPPI ??? cost=1727.263, norm_cost=215.804, length=8.00m",
+          "idx": 700,
+          "ratio": 1.0274487573663753,
+          "is_outlier": false
+        },
+        {
+          "length_m": 8.06,
+          "log_line": "[INFO] [1759618718.949627675]: [PlannerManager]   Path 8: MPPI ??? cost=1493.489, norm_cost=185.240, length=8.06m",
+          "idx": 703,
+          "ratio": 1.035154623046623,
+          "is_outlier": false
+        }
+      ],
+      "lines_idx": 549,
+      "straight_m": 7.7862763886212
+    },
+    {
+      "start": [
+        2.59,
+        11.59,
+        1.56
+      ],
+      "goal": [
+        8.3,
+        6.7,
+        0.98
+      ],
+      "paths": [
+        {
+          "length_m": 7.61,
+          "log_line": "[INFO] [1759618719.151285653]: [PlannerManager]   Path 1: MPPI ??? cost=1901.755, norm_cost=249.883, length=7.61m",
+          "idx": 857,
+          "ratio": 1.0092749432689219,
+          "is_outlier": false
+        },
+        {
+          "length_m": 5.87,
+          "log_line": "[INFO] [1759618719.154232758]: [PlannerManager]   Path 2: MPPI ??? cost=2472.376, norm_cost=421.164, length=5.87m",
+          "idx": 860,
+          "ratio": 0.7785077420484325,
+          "is_outlier": false
+        },
+        {
+          "length_m": 5.81,
+          "log_line": "[INFO] [1759618719.157155327]: [PlannerManager]   Path 3: MPPI ??? cost=2099.624, norm_cost=361.620, length=5.81m",
+          "idx": 863,
+          "ratio": 0.7705502523511742,
+          "is_outlier": false
+        },
+        {
+          "length_m": 8.56,
+          "log_line": "[INFO] [1759618719.160036469]: [PlannerManager]   Path 4: MPPI ??? cost=1978.800, norm_cost=231.151, length=8.56m",
+          "idx": 866,
+          "ratio": 1.1352685301421777,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.6,
+          "log_line": "[INFO] [1759618719.162892914]: [PlannerManager]   Path 5: MPPI ??? cost=1966.862, norm_cost=258.896, length=7.60m",
+          "idx": 869,
+          "ratio": 1.0079486949860454,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.15,
+          "log_line": "[INFO] [1759618719.165746584]: [PlannerManager]   Path 6: MPPI ??? cost=2372.891, norm_cost=332.055, length=7.15m",
+          "idx": 872,
+          "ratio": 0.9482675222566086,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.44,
+          "log_line": "[INFO] [1759618719.168646471]: [PlannerManager]   Path 7: MPPI ??? cost=2067.133, norm_cost=320.737, length=6.44m",
+          "idx": 875,
+          "ratio": 0.854103894172386,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.88,
+          "log_line": "[INFO] [1759618719.171538182]: [PlannerManager]   Path 8: MPPI ??? cost=2423.118, norm_cost=352.284, length=6.88m",
+          "idx": 878,
+          "ratio": 0.9124588186189464,
+          "is_outlier": false
+        }
+      ],
+      "lines_idx": 724,
+      "straight_m": 7.540066312705745
+    },
+    {
+      "start": [
+        3.27,
+        11.1,
+        1.36
+      ],
+      "goal": [
+        9.01,
+        6.03,
+        0.97
+      ],
+      "paths": [
+        {
+          "length_m": 6.93,
+          "log_line": "[INFO] [1759618719.870579442]: [PlannerManager]   Path 1: MPPI ??? cost=2775.031, norm_cost=400.263, length=6.93m",
+          "idx": 1033,
+          "ratio": 0.9037068714965413,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.28,
+          "log_line": "[INFO] [1759618719.873497433]: [PlannerManager]   Path 2: MPPI ??? cost=2123.718, norm_cost=338.415, length=6.28m",
+          "idx": 1036,
+          "ratio": 0.8189436007212524,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.73,
+          "log_line": "[INFO] [1759618719.876350722]: [PlannerManager]   Path 3: MPPI ??? cost=2864.052, norm_cost=425.452, length=6.73m",
+          "idx": 1039,
+          "ratio": 0.8776258651041448,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.21,
+          "log_line": "[INFO] [1759618719.879227095]: [PlannerManager]   Path 4: MPPI ??? cost=2987.289, norm_cost=414.183, length=7.21m",
+          "idx": 1042,
+          "ratio": 0.9402202804458965,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.78,
+          "log_line": "[INFO] [1759618719.882055818]: [PlannerManager]   Path 5: MPPI ??? cost=2613.701, norm_cost=385.785, length=6.78m",
+          "idx": 1045,
+          "ratio": 0.8841461167022439,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.62,
+          "log_line": "[INFO] [1759618719.884901032]: [PlannerManager]   Path 6: MPPI ??? cost=1843.852, norm_cost=242.003, length=7.62m",
+          "idx": 1048,
+          "ratio": 0.9936863435503095,
+          "is_outlier": false
+        }
+      ],
+      "lines_idx": 900,
+      "straight_m": 7.668415742511617
+    },
+    {
+      "start": [
+        3.28,
+        11.1,
+        1.35
+      ],
+      "goal": [
+        9.01,
+        6.03,
+        0.97
+      ],
+      "paths": [
+        {
+          "length_m": 6.38,
+          "log_line": "[INFO] [1759618719.930443746]: [PlannerManager]   Path 1: MPPI ??? cost=2119.753, norm_cost=332.237, length=6.38m",
+          "idx": 1207,
+          "ratio": 0.832851332885976,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.07,
+          "log_line": "[INFO] [1759618719.933514403]: [PlannerManager]   Path 2: MPPI ??? cost=2241.903, norm_cost=317.081, length=7.07m",
+          "idx": 1210,
+          "ratio": 0.9229245961604782,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.52,
+          "log_line": "[INFO] [1759618719.936354918]: [PlannerManager]   Path 3: MPPI ??? cost=2953.023, norm_cost=392.693, length=7.52m",
+          "idx": 1213,
+          "ratio": 0.9816680287308055,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.78,
+          "log_line": "[INFO] [1759618719.939280483]: [PlannerManager]   Path 4: MPPI ??? cost=2487.332, norm_cost=366.811, length=6.78m",
+          "idx": 1216,
+          "ratio": 0.8850677173929338,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.72,
+          "log_line": "[INFO] [1759618719.942099628]: [PlannerManager]   Path 5: MPPI ??? cost=1742.431, norm_cost=225.648, length=7.72m",
+          "idx": 1219,
+          "ratio": 1.0077762209842844,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.88,
+          "log_line": "[INFO] [1759618719.944938570]: [PlannerManager]   Path 6: MPPI ??? cost=2333.418, norm_cost=296.228, length=7.88m",
+          "idx": 1222,
+          "ratio": 1.0286627747870676,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.77,
+          "log_line": "[INFO] [1759618719.947757686]: [PlannerManager]   Path 7: MPPI ??? cost=1902.008, norm_cost=280.787, length=6.77m",
+          "idx": 1225,
+          "ratio": 0.8837623077802598,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.07,
+          "log_line": "[INFO] [1759618719.950564828]: [PlannerManager]   Path 8: MPPI ??? cost=1918.384, norm_cost=271.388, length=7.07m",
+          "idx": 1228,
+          "ratio": 0.9229245961604782,
+          "is_outlier": false
+        }
+      ],
+      "lines_idx": 1074,
+      "straight_m": 7.66043079728549
+    },
+    {
+      "start": [
+        3.79,
+        10.91,
+        1.03
+      ],
+      "goal": [
+        9.38,
+        5.7,
+        0.96
+      ],
+      "paths": [
+        {
+          "length_m": 7.19,
+          "log_line": "[INFO] [1759618720.378391506]: [PlannerManager]   Path 1: MPPI ??? cost=2698.199, norm_cost=375.346, length=7.19m",
+          "idx": 1383,
+          "ratio": 0.9408778619832533,
+          "is_outlier": false
+        },
+        {
+          "length_m": 5.49,
+          "log_line": "[INFO] [1759618720.381270594]: [PlannerManager]   Path 2: MPPI ??? cost=2935.270, norm_cost=535.002, length=5.49m",
+          "idx": 1386,
+          "ratio": 0.7184171713891601,
+          "is_outlier": false
+        },
+        {
+          "length_m": 5.09,
+          "log_line": "[INFO] [1759618720.384120066]: [PlannerManager]   Path 3: MPPI ??? cost=2812.629, norm_cost=552.944, length=5.09m",
+          "idx": 1389,
+          "ratio": 0.6660734794846674,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.35,
+          "log_line": "[INFO] [1759618720.387029911]: [PlannerManager]   Path 4: MPPI ??? cost=2984.149, norm_cost=470.211, length=6.35m",
+          "idx": 1392,
+          "ratio": 0.8309561089838189,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.58,
+          "log_line": "[INFO] [1759618720.389900523]: [PlannerManager]   Path 5: MPPI ??? cost=2449.101, norm_cost=372.340, length=6.58m",
+          "idx": 1395,
+          "ratio": 0.8610537318289022,
+          "is_outlier": false
+        }
+      ],
+      "lines_idx": 1250,
+      "straight_m": 7.641799526289604
+    },
+    {
+      "start": [
+        3.79,
+        10.91,
+        1.03
+      ],
+      "goal": [
+        9.38,
+        5.7,
+        0.96
+      ],
+      "paths": [
+        {
+          "length_m": 7.41,
+          "log_line": "[INFO] [1759618720.428176853]: [PlannerManager]   Path 1: MPPI ??? cost=2389.809, norm_cost=322.425, length=7.41m",
+          "idx": 1549,
+          "ratio": 0.9696668925307241,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.39,
+          "log_line": "[INFO] [1759618720.431050801]: [PlannerManager]   Path 2: MPPI ??? cost=2590.573, norm_cost=350.528, length=7.39m",
+          "idx": 1552,
+          "ratio": 0.9670497079354995,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.76,
+          "log_line": "[INFO] [1759618720.433908288]: [PlannerManager]   Path 3: MPPI ??? cost=1943.488, norm_cost=250.472, length=7.76m",
+          "idx": 1555,
+          "ratio": 1.015467622947155,
+          "is_outlier": false
+        },
+        {
+          "length_m": 8.44,
+          "log_line": "[INFO] [1759618720.436949831]: [PlannerManager]   Path 4: MPPI ??? cost=2153.019, norm_cost=255.040, length=8.44m",
+          "idx": 1558,
+          "ratio": 1.1044518991847925,
+          "is_outlier": false
+        },
+        {
+          "length_m": 8.78,
+          "log_line": "[INFO] [1759618720.440071012]: [PlannerManager]   Path 5: MPPI ??? cost=1768.712, norm_cost=201.412, length=8.78m",
+          "idx": 1561,
+          "ratio": 1.148944037303611,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.86,
+          "log_line": "[INFO] [1759618720.443011856]: [PlannerManager]   Path 6: MPPI ??? cost=1993.110, norm_cost=290.533, length=6.86m",
+          "idx": 1564,
+          "ratio": 0.897694316162047,
+          "is_outlier": false
+        }
+      ],
+      "lines_idx": 1416,
+      "straight_m": 7.641799526289604
+    },
+    {
+      "start": [
+        3.85,
+        10.89,
+        0.99
+      ],
+      "goal": [
+        9.38,
+        5.7,
+        0.96
+      ],
+      "paths": [
+        {
+          "length_m": 6.09,
+          "log_line": "[INFO] [1759618720.532079900]: [PlannerManager]   Path 1: MPPI ??? cost=2677.961, norm_cost=439.704, length=6.09m",
+          "idx": 1718,
+          "ratio": 0.8030004375581821,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.49,
+          "log_line": "[INFO] [1759618720.535039689]: [PlannerManager]   Path 2: MPPI ??? cost=2860.444, norm_cost=440.702, length=6.49m",
+          "idx": 1721,
+          "ratio": 0.8557426666260429,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.46,
+          "log_line": "[INFO] [1759618720.537943543]: [PlannerManager]   Path 3: MPPI ??? cost=2674.887, norm_cost=414.304, length=6.46m",
+          "idx": 1724,
+          "ratio": 0.8517869994459534,
+          "is_outlier": false
+        },
+        {
+          "length_m": 5.92,
+          "log_line": "[INFO] [1759618720.540800990]: [PlannerManager]   Path 4: MPPI ??? cost=2891.458, norm_cost=488.367, length=5.92m",
+          "idx": 1727,
+          "ratio": 0.7805849902043411,
+          "is_outlier": false
+        }
+      ],
+      "lines_idx": 1585,
+      "straight_m": 7.584055643255791
+    },
+    {
+      "start": [
+        4.91,
+        9.81,
+        0.74
+      ],
+      "goal": [
+        10.47,
+        4.76,
+        0.95
+      ],
+      "paths": [
+        {
+          "length_m": 7.58,
+          "log_line": "[INFO] [1759618721.577627647]: [PlannerManager]   Path 1: MPPI ??? cost=3006.026, norm_cost=396.702, length=7.58m",
+          "idx": 1883,
+          "ratio": 1.0087835682049864,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.31,
+          "log_line": "[INFO] [1759618721.580402599]: [PlannerManager]   Path 2: MPPI ??? cost=2779.407, norm_cost=380.067, length=7.31m",
+          "idx": 1886,
+          "ratio": 0.9728506442715633,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.65,
+          "log_line": "[INFO] [1759618721.583203520]: [PlannerManager]   Path 3: MPPI ??? cost=2895.683, norm_cost=435.542, length=6.65m",
+          "idx": 1889,
+          "ratio": 0.8850146079898628,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.92,
+          "log_line": "[INFO] [1759618721.585975317]: [PlannerManager]   Path 4: MPPI ??? cost=2215.605, norm_cost=279.810, length=7.92m",
+          "idx": 1892,
+          "ratio": 1.0540324353804078,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.9,
+          "log_line": "[INFO] [1759618721.588777080]: [PlannerManager]   Path 5: MPPI ??? cost=2824.695, norm_cost=357.483, length=7.90m",
+          "idx": 1895,
+          "ratio": 1.0513707373112655,
+          "is_outlier": false
+        },
+        {
+          "length_m": 6.66,
+          "log_line": "[INFO] [1759618721.591560478]: [PlannerManager]   Path 6: MPPI ??? cost=2752.444, norm_cost=413.061, length=6.66m",
+          "idx": 1898,
+          "ratio": 0.8863454570244339,
+          "is_outlier": false
+        },
+        {
+          "length_m": 7.47,
+          "log_line": "[INFO] [1759618721.594330862]: [PlannerManager]   Path 7: MPPI ??? cost=1901.981, norm_cost=254.613, length=7.47m",
+          "idx": 1901,
+          "ratio": 0.9941442288247029,
+          "is_outlier": false
+        },
+        {
+          "length_m": 8.12,
+          "log_line": "[INFO] [1759618721.597066190]: [PlannerManager]   Path 8: MPPI ??? cost=2430.772, norm_cost=299.250, length=8.12m",
+          "idx": 1904,
+          "ratio": 1.0806494160718323,
+          "is_outlier": false
+        }
+      ],
+      "lines_idx": 1750,
+      "straight_m": 7.514000266169812
+    }
+  ]
+}

@@ -1,8 +1,12 @@
 docker exec -it 65abafec5dc5 bash
 
+catkin_make
 source devel/setup.bash
 roslaunch ego_planner simple_run.launch
 
+
+roslaunch ego_planner rviz.launch
+roslaunch ego_planner run_in_sim.launch
 
 
 // 1. 直接路径检查，TOPO

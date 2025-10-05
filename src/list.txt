@@ -1,0 +1,6 @@
+结论速览
+/ego_planner_node/optimal_list — 来自轨迹可视化模块（显示 B‑spline 的“优化后控制点/轨迹”），消息类型：visualization_msgs::Marker。主要由 PlanningVisualization::displayOptimalList() 发布（见 traj_utils）。
+/ego_planner_node/init_list — 来自轨迹可视化模块（显示初始/候选控制点或初始轨迹），消息类型：visualization_msgs::Marker。由 PlanningVisualization::displayInitPathList() 发布。
+/mppi_optimal_trajectory — 来自 MPPI 优化器（MPPI 算法产出最优轨迹 + 速度箭头），消息类型：visualization_msgs::MarkerArray。由 MPPIPlanner 发布（mppi_planner.cpp）。
+/mppi_trajectories — 来自 MPPI（展示 MPPI 的采样/rollouts，通常是多条采样轨迹用于可视化），消息类型：visualization_msgs::MarkerArray。由 MPPIPlanner 发布。
+/topo_paths — 来自拓扑规划器（TopoPRM，PRM/拓扑候选路径），消息类型：visualization_msgs::MarkerArray。由 TopoPRM::visualizeTopoPaths() 发布（topo_prm.cpp）

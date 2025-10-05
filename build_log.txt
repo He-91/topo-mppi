@@ -1,0 +1,142 @@
+[  0%] Built target _quadrotor_msgs_generate_messages_check_deps_StatusData
+[  0%] Built target geometry_msgs_generate_messages_py
+[  0%] Built target nav_msgs_generate_messages_py
+[  0%] Built target _quadrotor_msgs_generate_messages_check_deps_Odometry
+[  0%] Built target _quadrotor_msgs_generate_messages_check_deps_LQRTrajectory
+[  0%] Built target _quadrotor_msgs_generate_messages_check_deps_AuxCommand
+[  0%] Built target _quadrotor_msgs_generate_messages_check_deps_Corrections
+[  0%] Built target _quadrotor_msgs_generate_messages_check_deps_Gains
+[  0%] Built target _quadrotor_msgs_generate_messages_check_deps_OutputData
+[  0%] Built target _quadrotor_msgs_generate_messages_check_deps_PositionCommand
+[  0%] Built target _quadrotor_msgs_generate_messages_check_deps_PPROutputData
+[  0%] Built target _quadrotor_msgs_generate_messages_check_deps_Serial
+[  0%] Built target _quadrotor_msgs_generate_messages_check_deps_PolynomialTrajectory
+[  0%] Built target _quadrotor_msgs_generate_messages_check_deps_SO3Command
+[  0%] Built target _quadrotor_msgs_generate_messages_check_deps_TRPYCommand
+[  7%] Built target quadrotor_msgs_generate_messages_py
+[  7%] Built target nav_msgs_generate_messages_nodejs
+[  7%] Built target geometry_msgs_generate_messages_nodejs
+[ 15%] Built target quadrotor_msgs_generate_messages_nodejs
+[ 15%] Built target nav_msgs_generate_messages_cpp
+[ 15%] Built target geometry_msgs_generate_messages_cpp
+[ 23%] Built target quadrotor_msgs_generate_messages_cpp
+[ 23%] Built target nav_msgs_generate_messages_eus
+[ 23%] Built target geometry_msgs_generate_messages_eus
+[ 31%] Built target quadrotor_msgs_generate_messages_eus
+[ 31%] Built target nav_msgs_generate_messages_lisp
+[ 31%] Built target geometry_msgs_generate_messages_lisp
+[ 39%] Built target quadrotor_msgs_generate_messages_lisp
+[ 39%] Built target quadrotor_msgs_generate_messages
+[ 40%] Built target encode_msgs
+[ 41%] Built target decode_msgs
+[ 43%] Built target random_forest
+[ 45%] Built target plan_env
+[ 47%] Built target path_searching
+[ 50%] Built target test_topo_mppi
+[ 52%] Built target bspline_opt
+[ 53%] Built target pose_utils
+[ 54%] Built target odom_visualization
+[ 55%] Building NVCC (Device) object uav_simulator/local_sensing/CMakeFiles/depth_render_cuda.dir/src/depth_render_cuda_generated_depth_render.cu.o
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(30): error: identifier "host_cloud_ptr" is undefined
+   if (!host_cloud_ptr && host_bytes > 0) {
+        ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(30): error: identifier "host_bytes" is undefined
+   if (!host_cloud_ptr && host_bytes > 0) {
+                          ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(31): error: identifier "cloud_size" is undefined
+    std::string msg = "DepthRender: host malloc failed for " + std::to_string(cloud_size) + " points";
+                                                                              ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(35): error: identifier "r" is undefined
+   for(int i = -r; i <= r; i++)
+                ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(43): error: identifier "dist_mm" is undefined
+     atomicMin(dist_ptr, dist_mm);
+                         ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(44): error: identifier "msg" is undefined
+                 , "%s\n", msg.c_str());
+                           ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(48): error: expected a ";"
+  {
+  ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(80): warning #12-D: parsing restarts here after previous syntax error
+                 , "%s\n", msg.c_str());
+                                       ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(81): error: identifier "parameter" is undefined
+   parameter.fy = _fy;
+   ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(81): error: identifier "_fy" is undefined
+   parameter.fy = _fy;
+                  ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(82): error: identifier "_cx" is undefined
+   parameter.cx = _cx;
+                  ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(83): error: identifier "_cy" is undefined
+   parameter.cy = _cy;
+                  ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(84): error: identifier "_width" is undefined
+   parameter.width = _width;
+                     ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(85): error: identifier "_height" is undefined
+   parameter.height = _height;
+                      ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(98): error: identifier "ROS_ERROR" is undefined
+    ROS_ERROR("%s", msg.c_str());
+    ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(110): error: identifier "ROS_ERROR" is undefined
+    ROS_ERROR("%s", msg.c_str());
+    ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(123): error: identifier "ROS_ERROR" is undefined
+    ROS_ERROR("%s", msg.c_str());
+    ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(132): error: identifier "ROS_ERROR" is undefined
+    ROS_ERROR("%s", msg.c_str());
+    ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(146): error: identifier "ROS_ERROR" is undefined
+    ROS_ERROR("%s", msg.c_str());
+    ^
+
+/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu(221): error: identifier "depth_initial" is undefined
+    depth_initial<<<depth_grid, depth_block>>>(depth_output.dev_ptr);
+    ^
+
+19 errors detected in the compilation of "/home/developer/ros_ws/topo-mppi/src/uav_simulator/local_sensing/src/depth_render.cu".
+CMake Error at depth_render_cuda_generated_depth_render.cu.o.Release.cmake:276 (message):
+  Error generating file
+  /home/developer/ros_ws/topo-mppi/build/uav_simulator/local_sensing/CMakeFiles/depth_render_cuda.dir/src/./depth_render_cuda_generated_depth_render.cu.o
+
+
+make[2]: *** [uav_simulator/local_sensing/CMakeFiles/depth_render_cuda.dir/build.make:328: uav_simulator/local_sensing/CMakeFiles/depth_render_cuda.dir/src/depth_render_cuda_generated_depth_render.cu.o] Error 1
+make[1]: *** [CMakeFiles/Makefile2:3553: uav_simulator/local_sensing/CMakeFiles/depth_render_cuda.dir/all] Error 2
+make: *** [Makefile:141: all] Error 2
+Base path: /home/developer/ros_ws/topo-mppi
+Source space: /home/developer/ros_ws/topo-mppi/src
+Build space: /home/developer/ros_ws/topo-mppi/build
+Devel space: /home/developer/ros_ws/topo-mppi/devel
+Install space: /home/developer/ros_ws/topo-mppi/install
+####
+#### Running command: "make cmake_check_build_system" in "/home/developer/ros_ws/topo-mppi/build"
+####
+####
+#### Running command: "make -j1" in "/home/developer/ros_ws/topo-mppi/build"
+####
+Invoking "make -j1" failed

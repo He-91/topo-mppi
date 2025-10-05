@@ -883,10 +883,11 @@ namespace ego_planner
     new_lambda2_ = lambda2_;
     constexpr int MAX_RESART_NUMS_SET = 3;
 
-    // Disable rebound loop - only do one optimization pass for smoothing only
-    // If rebound is attempted, log it as per user requirement
-    do
-    {
+  // Re-enable rebound loop: allow a few restart/rebound attempts (capped)
+  // so B-spline can try to escape infeasible local minima instead of silently failing.
+  const int MAX_RESTARTS = MAX_RESART_NUMS_SET; // keep original constant
+  while (restart_nums < MAX_RESTARTS && !success)
+  {
       /* ---------- prepare ---------- */
       min_cost_ = std::numeric_limits<double>::max();
       iter_num_ = 0;
@@ -960,10 +961,18 @@ namespace ego_planner
       }
       else if (result == lbfgs::LBFGSERR_CANCELED)
       {
-        flag_force_return = true;
+        // LBFGS signalled a cancel (likely due to earlyExit or infeasible region).
+        // Attempt a rebound: re-initialize control points, increase collision penalty and retry.
         rebound_times++;
-        cout << "iter=" << iter_num_ << ",time(ms)=" << time_ms << ",rebound." << endl;
-        ROS_WARN("[B-spline] Rebound attempted but disabled - B-spline is now smoothing-only!");
+        flag_force_return = false; // allow retries
+        ROS_WARN("[B-spline] LBFGS canceled -> attempting rebound/restart (#%d)", rebound_times);
+        // Re-init control points using current cps as a seed and increase collision weight
+        initControlPoints(cps_.points, false);
+        new_lambda2_ *= 2.0; // increase collision penalty to encourage feasibility
+        // Log the non-smoothing action explicitly so operator knows
+        ROS_WARN("[B-spline] Non-smoothing action: rebound/restart performed (new_lambda2=%.3f)", new_lambda2_);
+        // continue loop to retry optimization
+        continue;
       }
       else
       {
@@ -971,7 +980,7 @@ namespace ego_planner
         // while (ros::ok());
       }
 
-    } while (false); // Disabled rebound loop - only one pass for smoothing
+  }
 
     return success;
   }
